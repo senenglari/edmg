@@ -617,7 +617,7 @@ if (!function_exists("getSelectRoleAssignment")) {
 		$data = array(
 			array("id" => "REVIEWER", "name" => "REVIEWER"),
 			array("id" => "APPROVER", "name" => "APPROVER"),
-			array("id" => "OBSERVER", "name" => "OBSERVER"),
+			array("id" => "RESPONSIBILITY", "name" => "RESPONSIBILITY"),
 		);
 
 		return $data;

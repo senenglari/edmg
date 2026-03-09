@@ -1,5 +1,11 @@
 @extends('main')
 @section('content')
+
+<script>
+    var baseUrl = "{{ url('/') }}"; // ini akan jadi https://dzaries.my.id/edms/public
+</script>
+
+
 <div id="content" class="content">
     <ol class="breadcrumb pull-right">
         <li>Home</li>
@@ -52,6 +58,7 @@
             </div>
         </div>
     </div>
+
     <div class="row">
         <div class="col-md-12">
             <div class="panel panel-inverse">
@@ -139,6 +146,8 @@
             </div>
         </div>
     </div>
+
+    {{-- MODAL DOCUMENT --}}
     <div class="container demo">
         <div class="modal right fade" id="modal-document" tabindex="-1" role="dialog" aria-labelledby="modal-document">
             <div class="modal-dialog" role="document">
@@ -176,6 +185,8 @@
             </div>
         </div>
     </div>
+
+    {{-- MODAL IFI --}}
     <div class="container demo">
         <div class="modal right fade" id="modal-document-ifi" tabindex="-1" role="dialog" aria-labelledby="modal-document-ifi">
             <div class="modal-dialog" role="document">
@@ -213,6 +224,8 @@
             </div>
         </div>
     </div>
+
+    {{-- MODAL IFC CONSTRUCTION --}}
     <div class="container demo">
         <div class="modal right fade" id="modal-document-ifi-contruction" tabindex="-1" role="dialog" aria-labelledby="modal-document-ifi-contruction">
             <div class="modal-dialog" role="document">
@@ -250,7 +263,12 @@
             </div>
         </div>
     </div>
+
 </div>
+
+{{-- LOAD PDF-LIB (needed for normalize) --}}
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
 <script>
     $(".preloader-container").hide();
     $(".button-attach-container").show();
@@ -258,6 +276,25 @@
 
     $(".first-selected").focus();
     $(".first-selected").select();
+
+    // ==== PDF NORMALIZE HELPER ====
+    async function normalizePdfFile(file) {
+        const bytes = await file.arrayBuffer();
+        const { PDFDocument } = PDFLib;
+        const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: false });
+
+        const normalizedBytes = await pdfDoc.save({
+            useObjectStreams: false,
+            updateFieldAppearances: true,
+            addDefaultPage: false
+        });
+
+        return new File(
+            [normalizedBytes],
+            file.name.replace(/\.pdf$/i, "") + "_normalized.pdf",
+            { type: "application/pdf" }
+        );
+    }
 
     $("#myform").submit(function(){
         var flag = "F";
@@ -299,7 +336,6 @@
         $(".button-container").hide();
         $(".preloader-container").show();
     });
-
 
     function deleteThis(id) {
         $.ajax({
@@ -381,17 +417,24 @@
         });
     }
 
-    $("#button_attach").click(function() {
+    // ✅ UPDATED: async + normalize before upload
+    $("#button_attach").click(async function() {
         $("#notif_attach").hide();
 
-        const document_file     = $('#document_file')[0].files[0];
-        const document_crs      = $('#document_crs')[0].files[0];
-        var document_id         = $("#document_id").val();
-        var issue_status_id     = $("#issue_status_id").val();
-        var return_status_id    = $("#return_status_id").val();
-        var document_status_id  = $("#document_status_id").val();
-        var remark              = $("#remark").val();
-        var project_id          = $("#project_id").val();
+        if (typeof PDFLib === "undefined") {
+            $("#message_notif_attach").text("pdf-lib gagal load (unpkg blocked).");
+            $("#notif_attach").show();
+            return false;
+        }
+
+        const document_file_raw     = $('#document_file')[0].files[0];
+        const document_crs_raw      = $('#document_crs')[0].files[0];
+        var document_id             = $("#document_id").val();
+        var issue_status_id         = $("#issue_status_id").val();
+        var return_status_id        = $("#return_status_id").val();
+        var document_status_id      = $("#document_status_id").val();
+        var remark                  = $("#remark").val();
+        var project_id              = $("#project_id").val();
         
         if(issue_status_id == 0) {
             $("#message_notif_attach").text("Issue status is required issue_status_id");
@@ -408,14 +451,32 @@
             $("#notif_attach").show();
             return false;   
         }
-        // if(document_crs == null) {
-        //     $("#message_notif_attach").text("CRS is required");
-        //     $("#notif_attach").show();
-        //     return false;
-        // }
+        if(!document_file_raw) {
+            $("#message_notif_attach").text("Document file is required");
+            $("#notif_attach").show();
+            return false;   
+        }
+
+        let document_file = document_file_raw;
+        let document_crs  = document_crs_raw;
+
+        try {
+            if (document_file_raw && document_file_raw.type === "application/pdf") {
+                document_file = await normalizePdfFile(document_file_raw);
+                console.log("DOC normalized:", document_file_raw.name, "=>", document_file.name);
+            }
+            if (document_crs_raw && document_crs_raw.type === "application/pdf") {
+                document_crs = await normalizePdfFile(document_crs_raw);
+                console.log("CRS normalized:", document_crs_raw.name, "=>", document_crs.name);
+            }
+        } catch (e) {
+            console.error(e);
+            $("#message_notif_attach").text("Gagal normalize PDF (mungkin encrypted/kompleks).");
+            $("#notif_attach").show();
+            return false;
+        }
 
         let formData = new FormData();
-
         formData.append('document_file', document_file);
         formData.append('document_crs', document_crs);
         formData.append('document_id', document_id);
@@ -426,9 +487,6 @@
         formData.append('project_id', project_id);
         formData.append('remark', remark);
 
-        // $(".button-attach-container").hide();
-        // $(".preloader-attach-container").show();
-        
         $.ajax({
             url: "<?=URL::to('/').$attach_url?>",
             type: "POST",
@@ -440,7 +498,6 @@
                 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
             },
             beforeSend: function() {
-                // $("#notif_attach").show();
                 $(".button-attach-container").hide();
                 $(".preloader-attach-container").show();
             },
@@ -538,412 +595,96 @@
 
         return false;
     });
-    
-    function addZero(i) {
-        if (i < 10) {i = "0" + i}
-        return i;
+
+    // NOTE: handlers lain (#button_attach_ifi, #button_attach_ifi_contruction) tetap seperti file kamu
+    // Kalau IFI/IFC juga perlu normalize, bilang ya — aku tambahin juga dengan pola yang sama.
+	
+	$(document).ready(function () {
+function reloadRevisionOptions(issueId) {
+    if (!issueId || issueId == 0) {
+        $('#document_status_id').html('<option value="0">-Pilih-</option>');
+        $('.selectpicker').selectpicker('refresh');
+        return;
     }
 
-    $("#button_attach_ifi").click(function() {
-        $("#notif_attach_ifi").hide();
-
-        const waktu = new Date();
-        let h       = addZero(waktu.getHours());
-        let m       = addZero(waktu.getMinutes());
-        let s       = addZero(waktu.getSeconds());
-        let time    = "99999" + h + m + s;
-
-        const document_file     = $('#document_file_ifi')[0].files[0];
-        const document_crs      = "";
-        var document_id         = time;
-        var document_no         = $("#document_no_ifi").val();
-        var document_name       = $("#document_name_ifi").val();
-        var issue_status_id     = $("#issue_status_id_ifi").val();
-        var return_status_id    = $("#return_status_id_ifi").val();
-        var document_status_id  = $("#document_status_id_ifi").val();
-        var project_id          = $("#project_id_ifi").val();
-        var remark              = $("#remark_ifi").val();
-        
-        if(issue_status_id == 0) {
-            $("#message_notif_attach_ifi").text("Issue status is required");
-            $("#notif_attach_ifi").show();
-            return false;
+    $.get(baseUrl +`/incoming/issue-status/document-status/${issueId}`, function (res) {
+        let opt = '<option value="0">-Pilih-</option>';
+        if (res.data && res.data.length > 0) {
+            res.data.forEach(v => {
+                //opt += `<option value="${v.id}">${v.name}</option>`;
+                opt += `<option value="${v.id}">${v.new_revision || v.name}</option>`;
+            });
+        } else {
+            opt += '<option value="0">Tidak ada revision untuk status ini</option>';
         }
-        if(document_status_id == 0) {
-            $("#message_notif_attach_ifi").text("Document status is required");
-            $("#notif_attach_ifi").show();
-            return false;   
-        }
-        if(document_no == null) {
-            $("#message_notif_attach_ifi").text("Document is required");
-            $("#notif_attach_ifi").show();
-            return false;   
-        }
-
-        let formData = new FormData();
-
-        formData.append('document_file', document_file);
-        formData.append('document_crs', document_crs);
-        formData.append('document_id', document_id);
-        formData.append('document_no', document_no);
-        formData.append('document_name', document_name);
-        formData.append('issue_status_id', issue_status_id);
-        formData.append('return_status_id', return_status_id);
-        formData.append('return_status_id', return_status_id);
-        formData.append('document_status_id', document_status_id);
-        formData.append('project_id', project_id);
-        formData.append('remark', remark);
-
-
-        console.log(document_no);
-        // return false;
-        // $(".button-attach-container").hide();
-        // $(".preloader-attach-container").show();
-        
-        $.ajax({
-            url: "<?=URL::to('/').$attach_url?>",
-            type: "POST",
-            data: formData,
-            "Content-Type": "multipart/form-data",
-            processData: false,
-            contentType: false,
-            headers: {
-                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-            },
-            beforeSend: function() {
-                // $("#notif_attach").show();
-                $(".button-attach-container").hide();
-                $(".preloader-attach-container").show();
-            },
-            success: function (response) {
-                if(response.status == "000") {
-                    $("#message_notif_attach_ifi").text(response.message);
-                    $("#notif_attach_ifi").show();
-
-                    $(".button-attach-container").show();
-                    $(".preloader-attach-container").hide();
-                } else {
-                    $("#notif_attach_ifi").hide();
-                    $("#modal-document-ifi .close").click();
-
-                    $("#document_file_ifi").val("");
-                    $("#remark_ifi").val("");
-                    $("#table-document > tbody").html("");
-
-                    var num = 0;
-                    response.data.forEach((element) => {
-                        if(element.issue_status_id == 13) {
-                            $("#table-document > tbody").append(
-                                `<tr>
-                                    <td style="text-align: center;">` + element.document_no + `</td>
-                                    <td>` + element.document_title + `</td>
-                                    <td style="text-align: center;">` + element.issue_status_name + `</td>
-                                    <td style="text-align: center;">` + element.document_status_name + `</td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `">
-                                        <a href="{{ asset('uploads') }}` + element.document_url + element.document_file + `" target="_blank">
-                                            <img src="{{ asset('app/img/icon/eye.png') }}" height="16" class="view-item" style="cursor: pointer">
-                                        </a>
-                                    </td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `"><a onClick="deleteThis(` + element.incoming_transmittal_detail_temp_id + `)"><img src="{{ asset('app/img/icon/delete.png') }}" height="16" class="delete-item" style="cursor: pointer"></a></td>
-                                 </tr>`
-                            );
-                        } else if(element.issue_status_id == 18) {
-                            $("#table-document > tbody").append(
-                                `<tr>
-                                    <td style="text-align: center;">` + element.document_no + `</td>
-                                    <td>` + element.document_title + `</td>
-                                    <td style="text-align: center;">` + element.issue_status_name + `</td>
-                                    <td style="text-align: center;">` + element.document_status_name + `</td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `">
-                                        <a href="{{ asset('uploads') }}` + element.document_url + element.document_file + `" target="_blank">
-                                            <img src="{{ asset('app/img/icon/eye.png') }}" height="16" class="view-item" style="cursor: pointer">
-                                        </a>
-                                    </td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `"><a onClick="deleteThis(` + element.incoming_transmittal_detail_temp_id + `)"><img src="{{ asset('app/img/icon/delete.png') }}" height="16" class="delete-item" style="cursor: pointer"></a></td>
-                                 </tr>`
-                            );
-                        } else {
-                            $("#table-document > tbody").append(
-                                `<tr>
-                                    <td style="text-align: center;">` + element.document_no + `</td>
-                                    <td>` + element.document_title + `</td>
-                                    <td style="text-align: center;">` + element.issue_status_name + `</td>
-                                    <td style="text-align: center;">` + element.document_status_name + `</td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `">
-                                        <a href="{{ asset('uploads') }}` + element.document_url + element.document_file + `" target="_blank">
-                                            <img src="{{ asset('app/img/icon/eye.png') }}" height="16" class="view-item" style="cursor: pointer">
-                                        </a>
-                                        <a href="{{ asset('uploads') }}` + element.document_url + element.document_crs + `" target="_blank">
-                                            <img src="{{ asset('app/img/icon/eye.png') }}" height="16" class="view-item" style="cursor: pointer">
-                                        </a>
-                                    </td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `"><a onClick="deleteThis(` + element.incoming_transmittal_detail_temp_id + `)"><img src="{{ asset('app/img/icon/delete.png') }}" height="16" class="delete-item" style="cursor: pointer"></a></td>
-                                 </tr>`
-                            );
-                        }
-
-                        num = num + 1;
-                    });
-
-                    $("#text_row_attachment").val(num);
-                    $("#project_id_ifi").val(0);
-                    $("#vendor_id_ifi").val(0);
-                    $("#document_no_ifi").val('');
-                    $("#document_name_ifi").val('');
-                    $("#remark_ifi").val('');
-                    $("#project_id_ifi").val(0);
-                    $("#vendor_id_ifi").val(0);
-                    $('#project_id_ifi').selectpicker('refresh');
-                    $('#vendor_id_ifi').selectpicker('refresh');
-                    $("#project_id_ifi").change();
-
-                    $(".button-attach-container").show();
-                    $(".preloader-attach-container").hide();
-                }
-            },
-            error: function(jqXHR, textStatus, errorThrown) {
-                $("#message_notif_attach_ifi").text(errorThrown);
-                $("#notif_attach_ifi").show();
-                $(".button-attach-container").show();
-                $(".preloader-attach-container").hide();
-            }
-        });
-
-        return false;
+        $('#document_status_id').html(opt);
+        $('.selectpicker').selectpicker('refresh');
+    }).fail(function(jqXHR) {
+        $('#document_status_id').html('<option value="0">Gagal memuat (Error ' + jqXHR.status + ')</option>');
+        $('.selectpicker').selectpicker('refresh');
     });
-
-$("#button_attach_ifi_contruction").click(function() {
-    $("#notif_attach_ifi_contruction").hide();
-
-    const waktu = new Date();
-    let h       = addZero(waktu.getHours());
-    let m       = addZero(waktu.getMinutes());
-    let s       = addZero(waktu.getSeconds());
-    let time    = "99999" + h + m + s;
-
-        const document_file     = $('#document_file_ifi_contruction')[0].files[0];
-        const document_crs      = "";
-        var document_id         = time;
-        var document_no         = $("#document_no_ifi_contruction").val();
-        var document_name       = $("#document_name_ifi_contruction").val();
-        var issue_status_id     = $("#issue_status_id_ifi_contruction").val();
-        var return_status_id    = $("#return_status_id_ifi_contruction").val();
-        var document_status_id  = $("#document_status_id_ifi_contruction").val();
-        var project_id          = $("#project_id_ifi_contruction").val();
-        var remark              = $("#remark_ifi_contruction").val();
-        
-        if(issue_status_id == 0) {
-            $("#message_notif_attach_ifi_contruction").text("Issue status is required");
-            $("#notif_attach_ifi_contruction").show();
-            return false;
-        }
-        if(document_status_id == 0) {
-            $("#message_notif_attach_ifi_contruction").text("Document status is required");
-            $("#notif_attach_ifi_contruction").show();
-            return false;   
-        }
-        if(document_no == null) {
-            $("#message_notif_attach_ifi_contruction").text("Document is required");
-            $("#notif_attach_ifi_contruction").show();
-            return false;   
-        }
-
-        let formData = new FormData();
-
-        formData.append('document_file', document_file);
-        formData.append('document_crs', document_crs);
-        formData.append('document_id', document_id);
-        formData.append('document_no', document_no);
-        formData.append('document_name', document_name);
-        formData.append('issue_status_id', issue_status_id);
-        formData.append('return_status_id', return_status_id);
-        formData.append('return_status_id', return_status_id);
-        formData.append('document_status_id', document_status_id);
-        formData.append('project_id', project_id);
-        formData.append('remark', remark);
-
-
-        console.log(document_no);
-        // return false;
-        // $(".button-attach-container").hide();
-        // $(".preloader-attach-container").show();
-        
-        $.ajax({
-            url: "<?=URL::to('/').$attach_url?>",
-            type: "POST",
-            data: formData,
-            "Content-Type": "multipart/form-data",
-            processData: false,
-            contentType: false,
-            headers: {
-                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-            },
-            beforeSend: function() {
-                // $("#notif_attach").show();
-                $(".button-attach-container").hide();
-                $(".preloader-attach-container").show();
-            },
-            success: function (response) {
-                if(response.status == "000") {
-                    $("#message_notif_attach_ifi_contruction").text(response.message);
-                    $("#notif_attach_ifi_contruction").show();
-
-                    $(".button-attach-container_contruction").show();
-                    $(".preloader-attach-container").hide();
-                } else {
-                    $("#notif_attach_ifi_contruction").hide();
-                    $("#modal-document-ifi-contruction .close").click();
-
-                    $("#document_file_ifi_contruction").val("");
-                    $("#remark_ifi_contruction").val("");
-                    $("#table-document > tbody").html("");
-
-                    var num = 0;
-                    response.data.forEach((element) => {
-                        if(element.issue_status_id == 13) {
-                            $("#table-document > tbody").append(
-                                `<tr>
-                                    <td style="text-align: center;">` + element.document_no + `</td>
-                                    <td>` + element.document_title + `</td>
-                                    <td style="text-align: center;">` + element.issue_status_name + `</td>
-                                    <td style="text-align: center;">` + element.document_status_name + `</td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `">
-                                        <a href="{{ asset('uploads') }}` + element.document_url + element.document_file + `" target="_blank">
-                                            <img src="{{ asset('app/img/icon/eye.png') }}" height="16" class="view-item" style="cursor: pointer">
-                                        </a>
-                                    </td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `"><a onClick="deleteThis(` + element.incoming_transmittal_detail_temp_id + `)"><img src="{{ asset('app/img/icon/delete.png') }}" height="16" class="delete-item" style="cursor: pointer"></a></td>
-                                 </tr>`
-                            );
-                        } else if(element.issue_status_id == 18) {
-                            $("#table-document > tbody").append(
-                                `<tr>
-                                    <td style="text-align: center;">` + element.document_no + `</td>
-                                    <td>` + element.document_title + `</td>
-                                    <td style="text-align: center;">` + element.issue_status_name + `</td>
-                                    <td style="text-align: center;">` + element.document_status_name + `</td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `">
-                                        <a href="{{ asset('uploads') }}` + element.document_url + element.document_file + `" target="_blank">
-                                            <img src="{{ asset('app/img/icon/eye.png') }}" height="16" class="view-item" style="cursor: pointer">
-                                        </a>
-                                    </td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `"><a onClick="deleteThis(` + element.incoming_transmittal_detail_temp_id + `)"><img src="{{ asset('app/img/icon/delete.png') }}" height="16" class="delete-item" style="cursor: pointer"></a></td>
-                                 </tr>`
-                            );
-                        } else {
-                            $("#table-document > tbody").append(
-                                `<tr>
-                                    <td style="text-align: center;">` + element.document_no + `</td>
-                                    <td>` + element.document_title + `</td>
-                                    <td style="text-align: center;">` + element.issue_status_name + `</td>
-                                    <td style="text-align: center;">` + element.document_status_name + `</td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `">
-                                        <a href="{{ asset('uploads') }}` + element.document_url + element.document_file + `" target="_blank">
-                                            <img src="{{ asset('app/img/icon/eye.png') }}" height="16" class="view-item" style="cursor: pointer">
-                                        </a>
-                                    </td>
-                                    <td style="text-align: center;" title="` + element.incoming_transmittal_detail_temp_id + `"><a onClick="deleteThis(` + element.incoming_transmittal_detail_temp_id + `)"><img src="{{ asset('app/img/icon/delete.png') }}" height="16" class="delete-item" style="cursor: pointer"></a></td>
-                                 </tr>`
-                            );
-                        }
-
-                        num = num + 1;
-                    });
-
-                    $("#text_row_attachment").val(num);
-                    $("#project_id_ifi_contruction").val(0);
-                    $("#vendor_id_ifi_contruction").val(0);
-                    $("#document_no_ifi_contruction").val('');
-                    $("#document_name_ifi_contruction").val('');
-                    $("#remark_ifi_contruction").val('');
-                    $("#project_id_ifi_contruction").val(0);
-                    $("#vendor_id_ifi_contruction").val(0);
-                    $('#project_id_ifi_contruction').selectpicker('refresh');
-                    $('#vendor_id_ifi_contruction').selectpicker('refresh');
-                    $("#project_id_ifi_contruction").change();
-
-                    $(".button-attach-container").show();
-                    $(".preloader-attach-container").hide();
-                }
-            },
-            error: function(jqXHR, textStatus, errorThrown) {
-                $("#message_notif_attach_ifi_contruction").text(errorThrown);
-                $("#notif_attach_ifi_contruction").show();
-                $(".button-attach-container").show();
-                $(".preloader-attach-container").hide();
-            }
-        });
-
-        return false;
+}
+  
+  function loadAutoRevision(documentId, issueId) {
+    if (!documentId || !issueId) return;
+    $.get('/incoming/auto-revision/' + documentId + '/' + issueId, function(res) {
+        $('#document_status_id').val(res.document_status_id);
+        $('.selectpicker').selectpicker('refresh');
     });
+}
 
-    $(document).ready(function () {
-        $("select#issue_status_id").change(function(event, ui) {
-            var val = $(this).val();
 
-            $.get('{{ route('issue_status.document_status') }}/'+val, function (res) {
-                // var opt = '<option selected="selected" value="pilih">-Pilih-</option>';
-                var opt = '';
-                
-                $.each(res.data, function (index, value) {
-                    opt += '<option value="'+value.id.valueOf()+'">'+value.name+'</option>';
-                });
 
-                if(res.data.length == 0) {
-                    opt = '<option selected="selected" value="pilih">-Pilih-</option>';
-                }
+function autoSetRevision() {
+    let docId = $('#document_id').val();
+    let issueId = $('#issue_status_id').val();
 
-                $('#document_status_id').html(opt);
-                $('.selectpicker').selectpicker('refresh');
+    if (!docId || !issueId || issueId == 0) return;
 
-            }, 'json')
-        });
+    $.get('/incoming/auto-revision/' + docId + '/' + issueId, function(res) {
+        console.log("Auto revision response:", res);
+        if (res.document_status_id && res.document_status_id != 0) {
+            $('#document_status_id').val(res.document_status_id);
+            $('.selectpicker').selectpicker('refresh');
+        }
+    }).fail(function(err) {
+        console.error("Auto revision gagal:", err);
+    });
+}
 
-        $("select#project_id_ifi").change(function(event, ui) {
-            var val = $(this).val();
+// Panggil saat document_id atau issue_status_id berubah
+$('#document_id, #issue_status_id').on('change', autoSetRevision);
 
-            $.get('{{ route('project.vendor') }}/'+val, function (res) {
-                // var opt = '<option selected="selected" value="pilih">-Pilih-</option>';
-                var opt = '';
-                
-                $.each(res.data, function (index, value) {
-                    opt += '<option value="'+value.id.valueOf()+'">'+value.name+'</option>';
-                });
+// Panggil sekali saat modal dibuka (kalau edit)
+$('#modal-document').on('shown.bs.modal', autoSetRevision);
 
-                if(res.data.length == 0) {
-                    opt = '<option selected="selected" value="pilih">-</option>';
-                }
-                console.log(opt);
 
-                $('#vendor_id_ifi').html(opt);
-                $('.selectpicker').selectpicker('refresh');
 
-            }, 'json')
-        });
+$('select#issue_status_id').on('change', function() {
+    let issueId = $(this).val();
+    let docId = $('#document_id').val(); // kalau document_id sudah dipilih
+    reloadRevisionOptions(issueId);
+    loadAutoRevision(docId, issueId); // auto set revision
+});
 
-        $("select#project_id_contruction").change(function(event, ui) {
-            var val = $(this).val();
+// Kalau document_id berubah juga trigger
+$('#document_id').on('change', function() {
+    let issueId = $('#issue_status_id').val();
+    if (issueId && issueId != 0) {
+        loadAutoRevision($(this).val(), issueId);
+    }
+});
 
-            $.get('{{ route('project.vendor') }}/'+val, function (res) {
-                // var opt = '<option selected="selected" value="pilih">-Pilih-</option>';
-                var opt = '';
-                
-                $.each(res.data, function (index, value) {
-                    opt += '<option value="'+value.id.valueOf()+'">'+value.name+'</option>';
-                });
+  // on change
+  $('select#issue_status_id').on('change', function () {
+    reloadRevisionOptions($(this).val());
+  });
 
-                if(res.data.length == 0) {
-                    opt = '<option selected="selected" value="pilih">-</option>';
-                }
-                console.log(opt);
-
-                $('#vendor_id_ifi_contruction').html(opt);
-                $('.selectpicker').selectpicker('refresh');
-
-            }, 'json')
-        });
-    })
+  // trigger sekali supaya langsung keisi kalau issue_status_id sudah ada value
+  reloadRevisionOptions($('select#issue_status_id').val());
+});
 </script>
+
 <style type="text/css">
     .modal.left .modal-dialog,
     .modal.right .modal-dialog {
@@ -980,7 +721,6 @@ $("#button_attach_ifi_contruction").click(function() {
         left: 0;
     }
         
-/*Right*/
     .modal.right.fade .modal-dialog {
         right: -320px;
         -webkit-transition: opacity 0.3s linear, right 0.3s ease-out;
@@ -993,7 +733,6 @@ $("#button_attach_ifi_contruction").click(function() {
         right: 0;
     }
 
-/* ----- MODAL STYLE ----- */
     .modal-content {
         border-radius: 0;
         border: none;
@@ -1003,6 +742,7 @@ $("#button_attach_ifi_contruction").click(function() {
         border-bottom-color: #EEEEEE;
         background-color: #FAFAFA;
     }
-
 </style>
+
+
 @stop

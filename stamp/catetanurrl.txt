@@ -1,0 +1,5 @@
+  //let alamat='http://dzaries.my.id:8000/uploads/document/5/251230PNDAQPE9_4_20260107143216.pdf?v=177';
+	//console.log(window.location.origin + BASE_URL + VIEW_URL);
+	//content: { location: { url: window.location.origin + BASE_URL + VIEW_URL } },
+	
+	//http://dzaries.my.id/edmg-github-clone/edmg/pdf-stamp/storage/5/support.pdf?v=1772074155

@@ -19,6 +19,97 @@ Route::group(['middleware' => ['auth']], function () {
             Route::get('/preview_json_ifu', 'Dashboard\DashboardController@preview_json_ifu');
             Route::get('/preview_afc', 'Dashboard\DashboardController@preview_afc');
             Route::get('/preview_json_afc', 'Dashboard\DashboardController@preview_json_afc');
+            
+            
+            Route::get('/incoming/auto-revision/{document_id}/{issue_status_id}', [IncomingController::class, 'getAutoRevisionAjax']);
+            
+            //Route::get('/incoming/auto-revision/{document_id}/{issue_status_id}', [IncomingController::class, 'getAutoRevisionAjax']);
+            
+            
+           // Route::get('/vendor_outgoing/edit/{id}', 'Transmittal\IncomingController@edit');
+            
+            /* ------- transmital company ---- */
+            
+// Transmittal → Incoming Company
+/*
+Route::group(['prefix' => 'incoming_company'], function () {
+    Route::get('/index', 'Transmittal\IncomingController@incomingCompanyIndex')
+        ->name('incoming_company.index');
+    Route::post('/index', 'Transmittal\IncomingController@incomingCompanyIndex');
+
+    Route::get('/assignment/{id}', 'Transmittal\IncomingController@incomingCompanyAssignment')
+        ->name('incoming_company.assignment');
+
+    Route::get('/transmittal_detail/{id}', 'Transmittal\IncomingController@incomingCompanyTransmittalDetail')
+        ->name('incoming_company.transmittal_detail');
+});
+*/
+
+
+
+// routes/web.php
+Route::group(['prefix' => 'incoming_company'], function () {
+    Route::get('/index', 'Transmittal\IncomingController@incomingCompanyIndex')
+        ->name('incoming_company.index');
+
+    // Halaman Assignment (Incoming Company)
+    Route::get('/assignment/{document_id}', 'Transmittal\IncomingController@showIncomingAssignment')
+        ->name('incoming_company.assignment');
+
+    // Simpan Assignment (Incoming Company)
+    Route::post('/assignment/{document_id}', 'Transmittal\IncomingController@storeIncomingAssignment')
+        ->name('incoming_company.assignment.store');
+
+    // Detail Transmittal
+    Route::get('/transmittal_detail/{document_id}', 'Transmittal\IncomingController@incomingCompanyTransmittalDetail')
+        ->name('incoming_company.transmittal_detail');
+        
+        
+    Route::post('incoming_company/assignment/add-user', [IncomingController::class, 'add_assignment_user'])
+     ->name('incoming_company.assignment.add_user');    
+     
+     Route::post('assignment/add-user', [IncomingController::class, 'add_assignment_user'])
+         ->name('incoming_company.assignment.add_user');
+         
+         
+         Route::get('assignment/{id}', [IncomingController::class, 'showIncomingAssignment'])
+        ->name('incoming_company.assignment');
+
+    // Route untuk SIMPAN user baru (ini yang harus dipanggil form)
+    Route::post('assignment/{id}/add-user', [IncomingController::class, 'add_assignment_user'])
+        ->name('incoming_company.assignment.add_user');
+        
+        
+        
+            Route::get('/comment/{document_id}', 
+        'Transmittal\IncomingController@commentCompany')
+        ->name('incoming_company.comment');
+
+    Route::post('/comment/save', 
+        'Transmittal\IncomingController@saveCommentCompany')
+        ->name('incoming_company.comment.save');
+
+        
+});
+
+
+Route::prefix('comment_company')->group(function(){
+
+Route::get('/list',
+'Transmittal\IncomingController@commentCompanyList')
+->name('comment_company.list');
+
+Route::get('/{document_id}',
+'Transmittal\IncomingController@commentCompany')
+->name('comment_company.comment');
+
+Route::post('/save',
+'Transmittal\IncomingController@saveCommentCompany')
+->name('comment_company.save');
+
+});
+
+
 
             /* ----------
             User
@@ -62,6 +153,11 @@ Route::group(['middleware' => ['auth']], function () {
                 Route::get('/report_detail_json/{params}', 'Transmittal\IncomingController@report_detail_json');
                 Route::get('/approve/{id}', 'Transmittal\IncomingController@approve');
                 Route::post('/save_approve', 'Transmittal\IncomingController@save_approve');
+                
+                
+                Route::get('/issue-status/document-status/{id}', [App\Http\Controllers\Transmittal\IncomingController::class, 'getDocumentStatusByIssue'])
+        ->name('issue_status.document_status');
+                
 
                 Route::get('/issue_status/{id?}', ['as' => 'issue_status.document_status', 'uses' => 'Transmittal\IncomingController@get_document_status']);
                 Route::get('/add_idc', 'Transmittal\IncomingController@add_idc');
@@ -97,21 +193,53 @@ Route::group(['middleware' => ['auth']], function () {
                 Route::get('/unfilter', 'Transmittal\OutgoingController@unfilter');
                 Route::get('/detail/{id}', 'Transmittal\OutgoingController@detail');
             });
-            Route::group(['prefix' => 'vendor_outgoing'], function () {
-                Route::get('/index', 'Transmittal\IncomingController@index');
-                Route::post('/index', 'Transmittal\IncomingController@index');
-                Route::get('/unfilter', 'Transmittal\IncomingController@unfilter');
-                Route::get('/detail/{id}', 'Transmittal\IncomingController@detail');
+            // Route::group(['prefix' => 'vendor_outgoing'], function () {
+            //     Route::get('/index', 'Transmittal\IncomingController@index');
+            //     Route::post('/index', 'Transmittal\IncomingController@index');
+            //     Route::get('/unfilter', 'Transmittal\IncomingController@unfilter');
+            //     Route::get('/detail/{id}', 'Transmittal\IncomingController@detail');
 
-                Route::get('/add', 'Transmittal\IncomingController@add');
-                Route::post('/save', 'Transmittal\IncomingController@save');
-                Route::post('/attach_item', 'Transmittal\IncomingController@attach_item');
-                Route::get('/delete_item/{id}', 'Transmittal\IncomingController@delete_item');
+            //     Route::get('/add', 'Transmittal\IncomingController@add');
+            //     Route::post('/save', 'Transmittal\IncomingController@save');
+            //     Route::post('/attach_item', 'Transmittal\IncomingController@attach_item');
+            //     Route::get('/delete_item/{id}', 'Transmittal\IncomingController@delete_item');
 
-                Route::get('/edit/{id}', 'Transmittal\IncomingController@edit');
-                Route::post('/update', 'Transmittal\IncomingController@update');
-                Route::get('/project/{id?}', ['as' => 'project.vendor', 'uses' => 'Transmittal\IncomingController@vendorproject']);
-            });
+            //     Route::get('/edit/{id}', 'Transmittal\IncomingController@edit');
+            //     Route::post('/update', 'Transmittal\IncomingController@update');
+            //     Route::get('/project/{id?}', ['as' => 'project.vendor', 'uses' => 'Transmittal\IncomingController@vendorproject']);
+            // });
+            
+            
+Route::group(['prefix' => 'vendor_outgoing'], function () {
+
+    Route::get('/index', 'Transmittal\IncomingController@index');
+    Route::post('/index', 'Transmittal\IncomingController@index');
+
+    Route::get('/unfilter', 'Transmittal\IncomingController@unfilter');
+
+    Route::get('/detail/{id}', 'Transmittal\IncomingController@detail');
+
+    // ADD + EDIT DRAFT
+    Route::get('/add/{id?}', 'Transmittal\IncomingController@add');
+
+    Route::post('/save', 'Transmittal\IncomingController@save');
+
+    Route::post('/attach_item', 'Transmittal\IncomingController@attach_item');
+
+    Route::get('/delete_item/{id}', 'Transmittal\IncomingController@delete_item');
+
+    Route::get('/edit/{id}', 'Transmittal\IncomingController@edit');
+
+    Route::post('/update', 'Transmittal\IncomingController@update');
+
+    Route::get('/project/{id?}', [
+        'as' => 'project.vendor',
+        'uses' => 'Transmittal\IncomingController@vendorproject'
+    ]);
+
+});            
+            
+            
             Route::group(['prefix' => 'project'], function () {
                 Route::get('/index', 'Project\ProjectController@index');
                 Route::post('/index', 'Project\ProjectController@index');
@@ -142,6 +270,15 @@ Route::group(['middleware' => ['auth']], function () {
                 Route::post('/save_clone_comment_temp', 'Document\DocumentController@save_clone_comment_temp');
                 Route::get('/delete_clone_comment_temp/{id}', 'Document\DocumentController@delete_clone_comment_temp');
                 Route::get('/detail/{id}', 'Document\DocumentController@detail');
+
+
+                // BARU DITAMBAH DI SINI
+                Route::get('/export-detail/{encodedId}', 'Document\DocumentController@exportDetail');
+                
+                Route::post('/export-multiple', 'Document\DocumentController@exportMultiple');
+
+                
+                
                 Route::get('/change_approval/{id}', 'Document\DocumentController@change_approval');
                 Route::post('/update_approval', 'Document\DocumentController@update_approval');
                 Route::get('/change_deadline/{id}', 'Document\DocumentController@change_deadline');

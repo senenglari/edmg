@@ -25,6 +25,99 @@ class IncomingModel extends Model
         $this->sysModel     = new SysModel;
     }
 
+
+
+
+
+
+  private $internalNumericStatuses = [
+        1,   // IFC (internal)
+        2,   // Re-IFC
+        3,   // IFA (internal)
+        4,   // Re-IFA
+        5,   // IFR (internal)
+        6,   // Re-IFR
+        7,   // IFI (internal)
+        8,   // Re-IFI
+        12,  // RE-AFC
+        14,  // RE-As-Built
+        15,  // PRA-IFC
+        16,  // PRA-IFR
+        17,  // PRA-IFI
+        18,  // PRA-TES
+        // Tambah kalau ada status lain yang masuk internal
+    ];
+
+    // 2. Mapping prefix untuk INTERNAL (RE-xxx atau PRA-xxx)
+    private $prefixMap = [
+        1  => 'IFC',         // IFC internal (tanpa RE- kalau approved)
+        2  => 'RE-IFC',
+        3  => 'IFA',         // IFA internal (tanpa RE- kalau approved)
+        4  => 'RE-IFA',
+        5  => 'IFR',
+        6  => 'RE-IFR',
+        7  => 'IFI',
+        8  => 'RE-IFI',
+        12 => 'RE-AFC',
+        14 => 'RE-As-Built',
+        15 => 'PRA-IFC',
+        16 => 'PRA-IFR',
+        17 => 'PRA-IFI',
+        18 => 'PRA-TES',
+    ];
+
+
+private function getAutoRevision($document_id, $issue_status_id)
+    {
+        $cycleLetter = $this->getCurrentCycleLetter($document_id);
+        $subNumeric  = $this->getMaxSubNumericForCycle($document_id, $cycleLetter) + 1;
+
+        $isInternal = in_array($issue_status_id, $this->internalNumericStatuses);
+
+        if ($isInternal) {
+            // Internal: pakai prefix dari map + cycle + - + sub-numeric
+            $prefix = $this->prefixMap[$issue_status_id] ?? 'RE-';  // default RE- kalau gak ada di map
+            $newName = "{$prefix} {$cycleLetter}-{$subNumeric}";
+
+            // Cari atau buat record di ref_document_status
+            $docStatus = DB::table('ref_document_status')
+                ->where('name', $newName)
+                ->where('status', 1)
+                ->first();
+
+            if (!$docStatus) {
+                return DB::table('ref_document_status')->insertGetId([
+                    'name'            => $newName,
+                    'issue_status_id' => $issue_status_id,
+                    'status'          => 1,
+                ]);
+            }
+
+            return $docStatus->document_status_id;
+        }
+    }
+
+
+
+private function getCurrentCycleLetter($document_id)
+{
+    $outgoingCount = DB::table('outgoing_transmittal_detail as otd')
+        ->join('incoming_transmittal_detail as itd', 'otd.incoming_transmittal_detail_id', '=', 'itd.incoming_transmittal_detail_id')
+        ->where('itd.document_id', $document_id)
+        ->count();
+
+    return chr(65 + $outgoingCount);  // 0=A, 1=B, 2=C, dst
+}
+
+private function getMaxSubNumericForCycle($document_id, $cycleLetter)
+{
+    return DB::table('incoming_transmittal_detail as itd')
+        ->join('ref_document_status as rds', 'itd.document_status_id', '=', 'rds.document_status_id')
+        ->where('itd.document_id', $document_id)
+        ->where('rds.name', 'like', "%{$cycleLetter}-%")  // cari yang ada - di belakang cycle
+        ->max(DB::raw("CAST(SUBSTRING_INDEX(rds.name, '-', -1) AS UNSIGNED)")) ?? -1;
+}
+
     public function getCollections() {
         try {
             $query  = DB::table($this->table)
@@ -69,6 +162,10 @@ class IncomingModel extends Model
             return array("status"=>false, "data"=>[]);
         }
     }
+    
+    
+
+
 
     public function getHeader($id) {
         $query      = DB::table($this->table)->select("$this->table.*", "incoming_transmittal_detail.issue_status_id", "ref_vendor.name AS vendor_name", "ref_vendor.email_address")
@@ -124,6 +221,106 @@ class IncomingModel extends Model
 
         return $query;
     }
+    
+    
+    public function getDocumentStatusByIssue_old($issue_status_id)
+{
+    $statuses = DB::table('ref_document_status')
+        ->select('document_status_id as id', 'name')
+        ->where('status', 1)
+        ->where(function ($q) use ($issue_status_id) {
+            $q->where('issue_status_id', $issue_status_id)
+              ->orWhere('issue_status_id', 0); // ambil juga yang umum
+        })
+        ->whereRaw("name REGEXP '^[0-9]+$$   |^[A-Z][0-9]+   $$'")
+        ->orderByRaw('CAST(name AS UNSIGNED) ASC')
+        ->get();
+
+    return response()->json(['data' => $statuses->toArray()]);
+}
+
+
+public function getDocumentStatusByIssueoldbaru($issue_status_id)
+{
+    // Daftar issue_status_id yang dianggap "internal" (numeric revision)
+    $internalStatusIds = [2,  4,  6,  8,12,  15, 16, 17, 18]; // sesuaikan dengan ID internal kamu (IFC, Re-IFC, PRA-IFC, dll)
+
+    $revisions = DB::table('ref_document_status')
+        ->select('document_status_id as id', 'name')
+        ->where('status', 1)
+        ->where(function ($q) use ($issue_status_id, $internalStatusIds) {
+            if (in_array($issue_status_id, $internalStatusIds)) {
+                // Untuk status internal: tampilkan numeric umum (issue_status_id = 0) + yang spesifik kalau ada
+                $q->where('issue_status_id', 0) // numeric 0,1,2,3...
+                  ->orWhere('issue_status_id', $issue_status_id);
+            } else {
+                // Untuk status external: hanya yang spesifik issue_status_id
+                $q->where('issue_status_id', $issue_status_id);
+            }
+        })
+        ->orderByRaw('
+            CASE 
+                WHEN name REGEXP "^[0-9]+$" THEN CAST(name AS UNSIGNED) 
+                ELSE 9999 
+            END ASC, name ASC
+        ') // numeric diurutkan dulu (0,1,2...), baru A0, B0 dst
+        ->get();
+
+    return response()->json(['data' => $revisions->toArray()]);
+}
+
+
+public function getDocumentStatusByIssue($issue_status_id)
+{
+    // Cek apakah status ini termasuk INTERNAL (RE- atau PRA-)
+    $issueStatus = DB::table('ref_issue_status')
+        ->where('issue_status_id', $issue_status_id)
+        ->first();
+
+    $isInternal = $issueStatus && (
+        stripos($issueStatus->name, 'RE-') !== false ||
+        stripos($issueStatus->name, 'PRA-') !== false
+    );
+
+    if (!$isInternal) {
+        // External: tampilkan murni A0, A1, dst (seperti sebelumnya)
+        $revisions = DB::table('ref_document_status')
+            ->select('document_status_id as id', 'name')
+            ->where('status', 1)
+            ->where('issue_status_id', $issue_status_id)
+            ->whereRaw("name REGEXP '^[A-Z][0-9]+$'")
+            ->orderByRaw('CAST(SUBSTRING(name, 2) AS UNSIGNED) ASC')
+            ->get();
+
+        return response()->json(['data' => $revisions->toArray()]);
+    }
+
+    // Internal (RE- atau PRA-): ambil cycle terakhir dari external + generate sub-numeric
+    // Cari cycle terakhir untuk dokumen ini (dari history incoming terakhir yang external)
+    // Asumsi: dokumen_id dari request atau session, atau ambil dari logic lain
+    // Untuk contoh ini, kita asumsikan dokumen_id dikirim via request atau ambil max cycle
+
+    $lastCycle = DB::table('incoming_transmittal_detail as itd')
+        ->join('ref_document_status as ds', 'itd.document_status_id', '=', 'ds.document_status_id')
+        ->where('itd.document_id', $request->document_id ?? 0) // ganti dengan dokumen_id real
+        ->whereRaw("ds.name REGEXP '^[A-Z][0-9]+$'") // hanya cycle murni (external)
+        ->max(DB::raw("SUBSTRING(ds.name, 1, 2)")); // ambil 'A0', 'A1', dst
+
+    $cycle = $lastCycle ?? 'A0'; // fallback kalau belum pernah external
+
+    // Generate sub-numeric dinamis (0 sampai 10 misalnya)
+    $subNumeric = [];
+    for ($i = 0; $i <= 10; $i++) {
+        $subNumeric[] = [
+            'id' => "dummy_{$cycle}_{$i}", // ID dummy, nanti di-attach bisa dihandle
+            'name' => "{$cycle}-{$i}",
+            'new_revision' => "{$cycle}-{$i}" // teks yang ditampilkan
+        ];
+    }
+
+    return response()->json(['data' => $subNumeric]);
+}
+
 
     public function emptyTemp() {
         DB::table("incoming_transmittal_detail_temp")->where("incoming_transmittal_detail_temp.created_by", Auth::user()->id)->delete();
@@ -219,6 +416,12 @@ class IncomingModel extends Model
                                 ->select("*")->where("created_by", Auth::user()->id)
                                 ->whereIn("issue_status_id", ['13','18'])->get();
 
+
+
+
+                                                // "issue_status_id"=>2,
+                                                // "issue_status_incoming_id"=>2,
+                                                
             foreach($qTempIncoming as $row_temp) {
                 $id_docs    = DB::table("document")
                                             ->insertGetId([
@@ -346,8 +549,8 @@ class IncomingModel extends Model
                                             "remark"=>$row->remark,
                                             "vendor_id"=>$row->vendor_id,
                                             "project_id"=>$row->project_id,
-                                            "issue_status_incoming_id"=>$row->issue_status_id,
-                                            "issue_status_id"=>$row->issue_status_id,
+                                            "issue_status_incoming_id"=>2,
+                                            "issue_status_id"=>2,
                                             "return_status_id"=>$row->return_status_id,
                                             "document_status_id"=>$row->document_status_id,
                                         ]);
@@ -497,6 +700,112 @@ class IncomingModel extends Model
             return array("status"=>false, "message"=>FAILED_MESSAGE, "id"=>0, 'error' => $e->getMessage());
         }
     }
+    
+    
+    
+    
+    public function updateIncomingWithAttach($request, $id) {
+    DB::beginTransaction();
+    try {
+        $user_id = Auth::user()->id;
+
+        // Update header
+        DB::table($this->table)
+            ->where("incoming_transmittal_id", $id)
+            ->update([
+                "incoming_no" => $request->incoming_no,
+                "receive_date" => !empty($request->receive_date) ? setYMD($request->receive_date, "/") : null,
+                "sender_date" => !empty($request->sender_date) ? setYMD($request->sender_date, "/") : null,
+                "subject" => $request->subject,
+                "remark" => $request->remark ?? $request->description,
+                "return_date_plan" => !empty($request->return_date_plan) ? setYMD($request->return_date_plan, "/") : null,
+                "return_date_actual" => !empty($request->return_date_actual) ? setYMD($request->return_date_actual, "/") : null,
+                "updated_by" => $user_id,
+                "updated_at" => Carbon::now()->toDateTimeString(),
+            ]);
+
+        // HANDLE RECEIPT (header) kalau ada upload baru
+        if ($request->hasFile('receipt') && $request->file('receipt')->isValid()) {
+            $file = $request->file('receipt');
+            $file_url = DOCUMENT_DIR . "/" . $id . "/";
+            $file_name = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME);
+            $file_name = $file_name . "_RCV_UPDATE_" . str_replace([".", "/"], "_", $request->incoming_no) . "_" . date("YmdHis") . "." . $file->getClientOriginalExtension();
+
+            $file_content = file_get_contents($file->getRealPath());
+            Storage::disk("uploads")->put($file_url . $file_name, $file_content);
+
+            DB::table($this->table)
+                ->where("incoming_transmittal_id", $id)
+                ->update([
+                    "receipt_url" => $file_url,
+                    "receipt_file" => $file_name,
+                ]);
+        }
+
+        // HANDLE ATTACH DOKUMEN BARU (dari temp table)
+        $qTemp = DB::table("incoming_transmittal_detail_temp")
+            ->select("incoming_transmittal_detail_temp.*", "document.vendor_id", "ref_department.name AS dept_name")
+            ->join("document", "incoming_transmittal_detail_temp.document_id", "document.document_id")
+            ->leftJoin("ref_department", "document.department_id", "ref_department.department_id")
+            ->where("incoming_transmittal_detail_temp.created_by", $user_id)
+            ->get();
+
+        foreach ($qTemp as $row) {
+            $new_url = DOCUMENT_DIR . "/" . $id;
+            $new_dir = public_path("/uploads") . $new_url;
+
+            if (!File::isDirectory($new_dir)) {
+                File::makeDirectory($new_dir, 0777, true, true);
+            }
+
+            // Copy file dokumen utama
+            $source_dir = public_path("/uploads") . $row->document_url . $row->document_file;
+            $destination_dir = public_path("/uploads") . $new_url . "/" . $row->document_file;
+
+            if (File::exists($source_dir)) {
+                File::copy($source_dir, $destination_dir);
+            }
+
+            // Copy CRS kalau ada
+            if ($row->document_crs) {
+                $source_crs = public_path("/uploads") . $row->document_url . $row->document_crs;
+                $dest_crs = public_path("/uploads") . $new_url . "/" . $row->document_crs;
+                if (File::exists($source_crs)) {
+                    File::copy($source_crs, $dest_crs);
+                }
+            }
+
+            // Insert ke detail permanen
+            DB::table("incoming_transmittal_detail")->insert([
+                "document_id" => $row->document_id,
+                "document_url" => $new_url . "/",
+                "document_file" => $row->document_file,
+                "document_crs" => $row->document_crs,
+                "incoming_transmittal_id" => $id,
+                "remark" => $row->remark,
+                "vendor_id" => $row->vendor_id,
+                "project_id" => $row->project_id,
+                "issue_status_id" => $row->issue_status_id,
+                "document_status_id" => $row->document_status_id,
+                "return_status_id" => $row->return_status_id,
+                // tambah field lain kalau perlu
+            ]);
+        }
+
+        // Hapus temp setelah diproses
+        DB::table("incoming_transmittal_detail_temp")
+            ->where("created_by", $user_id)
+            ->delete();
+
+        DB::commit();
+        return ["status" => true];
+    } catch (\Exception $e) {
+        DB::rollback();
+        $this->logModel->createError($e->getMessage(), "UPDATE INCOMING WITH ATTACH FAILED", "");
+        return ["status" => false, "message" => $e->getMessage()];
+    }
+}
+    
 
     public function saveIncomingIdc($request) {
         DB::beginTransaction();
@@ -792,6 +1101,14 @@ class IncomingModel extends Model
             $receive    = setYMD($request->sender_date, "/");
             $returndate = setYMD($request->return_date_plan, "/");
             $user_id    = Auth::user()->id;
+            
+   /*         
+ $projectEndDate = DB::table('project')
+            ->where('project_id', $request->project_id)
+            ->value('end_date'); // DATE: YYYY-MM-DD
+            $returndate= $projectEndDate;         
+     */       
+            
 			
 			$startDate = Carbon::now()->toDateString();            // tanggal approve
 			$endDate   = addWorkingDaysHardcode($startDate, 10);   // 10 hari kerja
@@ -812,6 +1129,7 @@ class IncomingModel extends Model
                 foreach($qDetail as $row) {
                     // DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id', deadline = ADDDATE('$receive', INTERVAL sys_config.max_due_days DAY), status = 2 WHERE document_id = '$row->document_id'");
 
+                    /*
                     if($row->issue_status_id == STATUS_ONLY_IFI) {
                         DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id', deadline = '$returndate', status = 7 WHERE document_id = '$row->document_id'");
                     } elseif($row->issue_status_id == 6) { // As-Built
@@ -822,6 +1140,21 @@ class IncomingModel extends Model
                         DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id', deadline = '$returndate', status = 6 WHERE document_id = '$row->document_id'");
                     } else {
                         DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id', deadline = '$returndate', status = 2 WHERE document_id = '$row->document_id'");
+                    }
+                    
+                    */
+                    
+                    
+                    if($row->issue_status_id == STATUS_ONLY_IFI) {
+                        DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id', status = 7 WHERE document_id = '$row->document_id'");
+                    } elseif($row->issue_status_id == 6) { // As-Built
+                        DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id',  status = 6 WHERE document_id = '$row->document_id'");
+                    } elseif($row->issue_status_id == 17) { // IFU-Approved
+                        DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id',  status = 6 WHERE document_id = '$row->document_id'");
+                    } elseif($row->issue_status_id == 19) { // AFC-Approved
+                        DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id',  status = 6 WHERE document_id = '$row->document_id'");
+                    } else {
+                        DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id',   status = 2 WHERE document_id = '$row->document_id'");
                     }
 
                     if($row->issue_status_id == STATUS_ONLY_IFI_CONSTRUCTION) {
@@ -924,6 +1257,7 @@ class IncomingModel extends Model
                                 $dataclient["issue_status_listing"]    = "";
                                 $dataclient["doc_status_listing"]      = "";
                                 $dataclient["deadline_listing"]        = "";
+                                $dataclient["title"] = "Document Review Notification";
 
                                 foreach($qIncomingDetail as $i => $dataInc) {
                                     $title                          = "Document Review Notification " . $dataInc->incoming_no;

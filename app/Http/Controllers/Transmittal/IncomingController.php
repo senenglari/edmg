@@ -19,11 +19,16 @@ use App\Model\Document\DocumentModel;
 use App\Model\Sys\SysModel;
 use App\Model\Sys\LogModel;
 
+
+
+
 class IncomingController extends Controller
 {
     protected $PROT_SideMenu, $PROT_Parent, $PROT_ModuleId, $PROT_ModuleName;
 
     public function __construct(Request $request) {
+        
+     
         # ---------------
         $uri                      = getUrl() . "/index";
         # ---------------
@@ -45,8 +50,58 @@ class IncomingController extends Controller
         View::share(array("SHR_Parent"=>$this->PROT_Parent, "SHR_Module"=>$this->PROT_ModuleName, "SHR_ModuleId"=>$this->PROT_ModuleId));
     }
 
+
+
+
+// Hanya load dropdown revision dari tabel yang sudah ada
+public function getDocumentStatusByIssueOld($issue_status_id)
+{
+    $revisions = DB::table('ref_document_status as a')
+        ->join('ref_issue_status as b', 'a.issue_status_id', '=', 'b.issue_status_id')
+        ->select('a.document_status_id as id', 'a.name', 'b.name as issue_status_name')
+        ->where('a.status', 1)
+        ->where('a.issue_status_id', $issue_status_id) // hanya yang cocok dengan issue status yang dipilih
+        ->orderByRaw('CAST(SUBSTRING(a.name, 2) AS UNSIGNED) ASC') // urut A0, A1, A2, ... A22 dst
+        ->get();
+
+    return response()->json([
+        'data' => $revisions->toArray()
+    ]);
+}
+
+public function getDocumentStatusByIssue($issue_status_id)
+{
+    // Daftar issue_status_id yang dianggap "internal" (numeric revision)
+    $internalStatusIds = [2,  4,  6,  8,12,  15, 16, 17, 18]; // sesuaikan dengan ID internal kamu (IFC, Re-IFC, PRA-IFC, dll)
+
+    $revisions = DB::table('ref_document_status')
+        ->select('document_status_id as id', 'name')
+        ->where('status', 1)
+        ->where(function ($q) use ($issue_status_id, $internalStatusIds) {
+            if (in_array($issue_status_id, $internalStatusIds)) {
+                // Untuk status internal: tampilkan numeric umum (issue_status_id = 0) + yang spesifik kalau ada
+                $q->where('issue_status_id', 0) // numeric 0,1,2,3...
+                  ->orWhere('issue_status_id', $issue_status_id);
+            } else {
+                // Untuk status external: hanya yang spesifik issue_status_id
+                $q->where('issue_status_id', $issue_status_id);
+            }
+        })
+        ->orderByRaw('
+            CASE 
+                WHEN name REGEXP "^[0-9]+$" THEN CAST(name AS UNSIGNED) 
+                ELSE 9999 
+            END ASC, name ASC
+        ') // numeric diurutkan dulu (0,1,2...), baru A0, B0 dst
+        ->get();
+
+    return response()->json(['data' => $revisions->toArray()]);
+}
+
+
     public function index(Request $request)
     {
+      
         try {
             $data["title"]            = ucwords(strtolower($this->PROT_ModuleName));
             $data["parent"]           = ucwords(strtolower($this->PROT_Parent));
@@ -230,6 +285,8 @@ class IncomingController extends Controller
             $data["buttons"][]     = form_button_submit(array("name"=>"button_search", "label"=>"&nbsp;&nbsp;Search&nbsp;&nbsp;"));
             $data["buttons"][]     = form_action_button(array("name"=>"button_clear", "label"=>"&nbsp;&nbsp;Clear&nbsp;&nbsp;", "url"=>($this->isVendor == "YES") ? "/vendor_outgoing/unfilter" : "/incoming/unfilter"));
             # ---------------
+            
+            //echo 'bb';die;
             return view("default.list", $data);
         } catch (\Exception $e) {
             throw $e;
@@ -238,6 +295,383 @@ class IncomingController extends Controller
             return view("error.405");
         }
     }
+    
+    
+    
+// app/Http/Controllers/Transmittal/IncomingController.php
+
+public function showIncomingAssignment($documentId)
+{
+    //echo 'xxx';die;
+    // dokumen harus ada dan status >= 6
+    $doc = DB::table('document')->where('document_id', $documentId)->first();
+    abort_if(!$doc, 404, 'Dokumen tidak ditemukan.');
+    abort_if($doc->status < 6, 403, 'Dokumen belum selesai (status kurang dari DONE).');
+
+    // === USERS LENGKAP UNTUK MODAL ADD USERS ===
+    $users = DB::table('sys_users')
+        ->leftJoin('ref_department', 'sys_users.department_id', '=', 'ref_department.department_id')
+        ->leftJoin('ref_discipline', 'sys_users.discipline_id', '=', 'ref_discipline.discipline_id')
+        ->leftJoin('ref_position', 'sys_users.position_id', '=', 'ref_position.position_id')
+        ->where('sys_users.user_status', 1)
+        ->select(
+            'sys_users.id',
+            'sys_users.full_name',
+            'ref_department.name as department_name',
+            'ref_discipline.name as discipline_name',
+            'ref_position.name as position_name'
+        )
+        ->orderBy('sys_users.full_name')
+        ->get();
+
+    // === ROLE KHUSUS Incoming Company ===
+    $selectRole = [
+        ['id' => 'RESPONSIBILITY', 'name' => 'RESPONSIBILITY'],
+        ['id' => 'OWNER',          'name' => 'OWNER'],
+        ['id' => 'APPROVER',       'name' => 'APPROVER'],
+    ];
+
+    // === DATA ASSIGNMENT YANG SUDAH ADA (untuk tabel) ===
+   // === DATA ASSIGNMENT YANG SUDAH ADA (untuk tabel) ===
+$comment = DB::table('comment as c')
+    ->join('sys_users as u', 'c.user_id', '=', 'u.id')
+    ->leftJoin('ref_department as d', 'u.department_id', '=', 'd.department_id')
+    ->leftJoin('ref_discipline as ds', 'u.discipline_id', '=', 'ds.discipline_id')
+    ->leftJoin('ref_position as p', 'u.position_id', '=', 'p.position_id')
+    ->whereExists(function ($q) use ($documentId) {
+        $q->select(DB::raw(1))
+          ->from('assignment as a')
+          ->whereColumn('a.assignment_id', 'c.assignment_id')
+          ->where('a.document_id', $documentId);
+    })
+    ->select(
+        'c.comment_id',              // ← primary key yang benar
+        'c.user_id',
+        'c.role',
+        'c.start_date',
+        'c.end_date',
+        'c.status',
+        'c.order_no',
+        'u.full_name',
+        'd.name as department_name',
+        'ds.name as discipline_name',
+        'p.name as position_name'
+        // HAPUS 'c.comment_temp_id' karena tidak ada di tabel comment
+    )
+    ->orderBy('c.order_no')
+    ->get();
+
+    // variabel lain yang dibutuhkan blade
+    $title                = 'Assignment (Incoming Company) - '.($doc->document_no ?? $documentId);
+    $statusAssignment     = '';
+    $idDoc                = $documentId;
+    $status_document      = $doc->status ?? 0;
+    $document_id          = $documentId;
+    $assignment_id        = 0;
+    $status_nonaktif      = $doc->status_nonaktif ?? 0;
+
+    $form_act = route('incoming_company.assignment.store', $documentId);
+
+    return view('incoming/assignment_ic', compact(
+        'title','comment','users','selectRole',
+        'statusAssignment','idDoc',
+        'status_document','document_id','assignment_id','status_nonaktif',
+        'form_act'
+    ));
+}
+
+
+
+
+public function storeIncomingAssignment(Request $request, $documentId)
+{
+    $request->validate([
+        'user_id' => 'required',
+        'user_id.*' => 'required|integer|exists:sys_users,id',
+        'role' => 'required',
+        'role' => 'required',
+    ]);
+
+    $doc = DB::table('document')->where('document_id', $documentId)->first();
+    abort_if(!$doc, 404, 'Dokumen tidak ditemukan.');
+
+    DB::transaction(function () use ($request, $doc) {
+
+        // Ambil atau buat assignment header
+        $assignmentId = DB::table('assignment')
+            ->where('document_id', $doc->document_id)
+            ->where('incoming_transmittal_detail_id', (int) ($doc->incoming_transmittal_detail_id ?? 0))
+            ->where('status_nonaktif', 0)
+            ->value('assignment_id');
+
+        if (!$assignmentId) {
+            $assignmentId = DB::table('assignment')->insertGetId([
+                'document_id'                    => (int) $doc->document_id,
+                'incoming_transmittal_detail_id' => (int) ($doc->incoming_transmittal_detail_id ?? 0),
+                'status_nonaktif'                => 0,
+                'created_by'                     => Auth::id() ?? 0,
+                'created_at'                     => now(),
+            ]);
+        }
+
+// print_r($request->role);
+// print_r($request->user_id);
+//die;
+
+
+$rolex=$request->role;
+$user_id=$request->user_id;
+        // Simpan user
+       // foreach ($request->user_id as $idx => $user_id) {
+            //$role = $request->role[$idx] ?? 'RESPONSIBILITY';
+//echo $role;
+
+            DB::table('comment')->insert([
+                'assignment_id'   => (int) $assignmentId,
+                'user_id'         => (int) $user_id,
+                'role'            => $rolex,
+                'start_date'      => null,
+                'end_date'        => null,
+                'remark'          => null,
+                'issue_status_id' => 0,
+                'return_status_id'=> 0,
+                'status'          => 10,
+                'order_no'        => 1,
+                'created_by'      => Auth::id() ?? 0,
+                'created_at'      => now(),
+                'status_nonaktif' => 0,
+            ]);
+       // }
+    });
+
+//echo "www";
+//die;
+    return redirect()->route('incoming_company.index')
+        ->with('success_message', 'Assignment (Incoming Company) berhasil disimpan.');
+}  
+    
+    
+ 
+ 
+// app/Http/Controllers/Transmittal/IncomingController.php
+
+/**
+ * Entry point untuk Assignment Incoming Company
+ * Redirect ke halaman assignment dokumen biasa dengan flag ?src=ic
+ */
+public function incomingCompanyAssignment($documentId)
+{
+    
+    //echo 'xx';die;
+    // 1. Pastikan dokumen ada
+    $doc = DB::table('document')
+        ->where('document_id', $documentId)
+        ->first();
+
+    abort_if(!$doc, 404, 'Dokumen tidak ditemukan.');
+
+    // 2. PERUBAHAN SESUAI PERMINTAAN ANDA:
+    //    Status boleh 6 (DONE) atau lebih besar (10, 20, 30, dst)
+    abort_if($doc->status < 6, 403, 'Dokumen belum selesai (status kurang dari DONE).');
+
+    // 3. Pastikan ada record assignment (header) — jika belum, buat
+    $assignmentExists = DB::table('assignment')
+        ->where('document_id', $doc->document_id)
+        ->where('incoming_transmittal_detail_id', (int) ($doc->incoming_transmittal_detail_id ?? 0))
+        ->where('status_nonaktif', 0)
+        ->exists();
+
+    if (!$assignmentExists) {
+        DB::table('assignment')->insert([
+            'document_id'                    => (int) $doc->document_id,
+            'incoming_transmittal_detail_id' => (int) ($doc->incoming_transmittal_detail_id ?? 0),
+            'status_nonaktif'                => 0,
+            'created_by'                     => Auth::id() ?? 0,
+            'created_at'                     => now(),
+        ]);
+    }
+
+    // 4. Encode ID dan redirect ke halaman assignment yang sudah ada + flag src=ic
+    $encoded = encodedData($documentId);
+    
+    die;
+    //return redirect()->to(url("/document/assignment/{$encoded}?src=ic"));
+}
+
+
+
+
+    
+
+/**
+ * AJAX endpoint untuk menambah user di assignment Incoming Company
+ */
+/**
+ * Menambahkan user baru ke assignment via modal di Incoming Company
+ * Dipanggil dari AJAX di assignment_ic.blade.php
+ *
+ * @param Request $request
+ * @return \Illuminate\Http\JsonResponse
+ */
+
+
+
+    /**
+     * Detail Transmittal → jika dokumen punya tautan ke transmittal incoming,
+     * redirect ke /incoming/detail/{idHeaderTransmittal} (controller existing).
+     */
+public function incomingCompanyTransmittalDetail($documentId)
+{
+    $doc = DB::table('document')->where('document_id', $documentId)->first();
+    if (!$doc) {
+        return redirect()->route('incoming_company.index')->with('warning', 'Dokumen tidak ditemukan.');
+    }
+
+    $headerId = null;
+    if (!empty($doc->incoming_transmittal_detail_id)) {
+        $headerId = DB::table('incoming_transmittal_detail')
+            ->where('incoming_transmittal_detail_id', $doc->incoming_transmittal_detail_id)
+            ->value('incoming_transmittal_id');
+    }
+
+    if ($headerId) {
+        return redirect()->to(url('incoming/detail/'.$headerId));
+    }
+
+    return redirect()->route('incoming_company.index')
+        ->with('warning', 'Dokumen ini belum terhubung ke Transmittal Incoming.');
+}
+    
+    
+    
+    
+
+    /**
+     * List dokumen DONE khusus Incoming Company (untuk tombol Assign & Detail)
+     */
+
+public function incomingCompanyIndex(\Illuminate\Http\Request $request)
+{
+    // ambil data DONE = status 6
+    $q = DB::table('document AS d')
+        ->leftJoin('ref_vendor AS v', 'v.vendor_id', '=', 'd.vendor_id')
+        ->leftJoin('ref_issue_status AS is', 'is.issue_status_id', '=', 'd.issue_status_id')
+        ->select(
+            'd.document_id',
+            'd.document_no',
+            'd.document_title',
+            'd.status',
+            'd.incoming_transmittal_detail_id',
+            'v.name AS vendor_name',
+            'is.name AS issue_status_name',
+            'd.created_at',
+            'd.deadline'
+        )
+        ->where('d.status', 6); // DONE
+
+    $documents = $q->orderByDesc('d.document_id')
+                   ->paginate(25)
+                   ->appends($request->query());
+
+    $title = 'Incoming Company – Dokumen DONE';
+    return view('incoming/incoming_company_index', compact('documents', 'title'));
+}
+    
+    
+    
+//===========================================================
+
+public function commentCompany($documentId)
+{
+
+$doc = DB::table('document')
+->where('document_id',$documentId)
+->first();
+
+$comments = DB::table('comment as c')
+->join('assignment as a','a.assignment_id','=','c.assignment_id')
+->join('sys_users as u','u.id','=','c.user_id')
+->where('a.document_id',$documentId)
+->where('c.status_nonaktif',0)
+->orderBy('c.order_no')
+->get([
+'c.comment_id',
+'c.role',
+'c.remark',
+'c.status',
+'u.full_name'
+]);
+
+$title="Comment Company - ".$doc->document_no;
+
+return view('comments.company_comment',compact(
+'comments','doc','title'
+));
+
+}
+    
+    
+public function commentCompanyList()
+{
+
+$userId = Auth::id();
+
+$documents = DB::table('document as d')
+->join('assignment as a','a.document_id','=','d.document_id')
+->join('comment as c','c.assignment_id','=','a.assignment_id')
+->leftJoin('ref_vendor as v','v.vendor_id','=','d.vendor_id')
+->where('c.user_id',$userId)
+->where('d.status',6)
+->select(
+'d.document_id',
+'d.document_no',
+'d.document_title',
+'v.name as vendor_name'
+)
+->distinct()
+->orderBy('d.document_id','desc')
+->paginate(20);
+
+$title="Comment Company";
+
+return view('comments.company_list',compact(
+'documents','title'
+));
+
+}
+    
+    
+    
+  public function saveCommentCompany(Request $request)
+{
+
+$request->validate([
+'comment_id'=>'required',
+'remark'=>'required',
+'status'=>'required|in:10,20,30'
+]);
+
+DB::table('comment')
+->where('comment_id',$request->comment_id)
+->update([
+'remark'=>$request->remark,
+'status'=>$request->status,
+'updated_by'=>Auth::id(),
+'updated_at'=>now()
+]);
+
+return back()->with('success_message','Comment berhasil disimpan');
+
+}  
+    
+    
+    
+    
+
+    
+/*===================================*/    
+    
+    
 
     public function unfilter() {
         session()->forget("SES_SEARCH_INCOMING_NO");
@@ -252,11 +686,30 @@ class IncomingController extends Controller
         }
     }
 
-    public function add() {
+    public function add($id = null){
+        
+        if($id){
+            $id = decodedData($id);
+        
+            $header = DB::table('incoming_transmittal')
+                ->where('incoming_transmittal_id',$id)
+                ->first();
+        }
         try {
             $data["title"]         = ($this->isVendor == "YES") ? "Add Outgoing Transmittal" : "Add Incoming Transmittal";
             $data["parent"]        = ucwords(strtolower($this->PROT_Parent));
-            $data["form_act"]      = ($this->isVendor == "YES") ? "/vendor_outgoing/save" : "/incoming/save";
+            //$data["form_act"]      = ($this->isVendor == "YES") ? "/vendor_outgoing/save" : "/incoming/save";
+            
+            if($id){
+                $data["form_act"] = ($this->isVendor == "YES")
+                    ? "/vendor_outgoing/update"
+                    : "/incoming/update";
+            }else{
+                $data["form_act"] = ($this->isVendor == "YES")
+                    ? "/vendor_outgoing/save"
+                    : "/incoming/save";
+            }
+                        
             /* ----------
              Model
             ----------------------- */
@@ -269,7 +722,11 @@ class IncomingController extends Controller
             $selectProject            = $this->qReference->getSelectProject();
             $selectVendorUser         = $this->qReference->getSelectVendorUser(Auth::user()->vendor_id);
             $selectProjectUser        = $this->qReference->getSelectProjectUser(Auth::user()->vendor_id);
-            $selectDocumentStatus     = [];
+            //$selectDocumentStatus     = [];
+            //$selectDocumentStatus = $this->qReference->getSelectDocumentStatus();
+            
+            $selectDocumentStatus = $this->qReference->getSelectDocumentStatusInternal();
+            
             $selectDocumentStatusIFI  = array(array("id"=>120, "name"=>"0A"));
             // $selectDocumentStatus  = $this->qReference->getSelectDocumentStatus();
             # ---------------
@@ -279,14 +736,41 @@ class IncomingController extends Controller
              Fields
             ----------------------- */
             $data["fields"][]      = form_hidden(array("name"=>"vendor_id", "label"=>"Vendor", "mandatory"=>"yes", "value"=>Auth::user()->vendor_id));
-            $data["fields"][]      = form_text(array("name"=>"incoming_no", "label"=>($this->isVendor == "YES") ? "Outgoing Number" : "Incoming Number", "mandatory"=>"yes", "first_selected"=>"yes"));
+            //$data["fields"][]      = form_text(array("name"=>"incoming_no", "label"=>($this->isVendor == "YES") ? "Outgoing Number" : "Incoming Number", "mandatory"=>"yes", "first_selected"=>"yes"));
+           
+            $data["fields"][] = form_text([
+            "name"=>"incoming_no",
+            "label"=>"Outgoing Number",
+            "mandatory"=>"yes",
+            "first_selected"=>"yes",
+            "value"=> isset($header->incoming_no) ? $header->incoming_no : ""
+            ]);        
+           
+           
             $data["fields"][]      = form_hidden(array("name"=>"receive_date", "label"=>($this->isVendor == "YES") ? "Sending Date" : "Receive Date", "mandatory"=>"yes", "value"=>date("d/m/Y")));
             $data["fields"][]      = form_hidden(array("name"=>"sender_date", "label"=>"Sender Date", "mandatory"=>"yes", "value"=>date("d/m/Y")));
-            $data["fields"][]      = form_text(array("name"=>"subject", "label"=>"Subject", "mandatory"=>"yes", "value"=>""));
+            //$data["fields"][]      = form_text(array("name"=>"subject", "label"=>"Subject", "mandatory"=>"yes", "value"=>""));
+            
+            $data["fields"][] = form_text(array(
+            "name"=>"subject",
+            "label"=>"Subject",
+            "mandatory"=>"yes",
+            "value"=> isset($header->subject) ? $header->subject : ""
+            ));
+                        
             $data["fields"][]      = form_hidden(array("name"=>"return_date_plan", "label"=>"Return Plan Date", "value"=>date("d/m/Y")));
             $data["fields"][]      = form_hidden(array("name"=>"return_date_actual", "label"=>"Return Plan Actual", "value"=>date("d/m/Y")));  
             $data["fields"][]      = form_text(array("name"=>"description", "label"=>"Remark"));          
             $data["fields"][]      = form_upload(array("name"=>"receipt", "label"=>"Receipt"));
+            
+            
+            
+            $data["fields"][] = form_hidden(array(
+            "name"=>"incoming_transmittal_id",
+            "value"=> isset($header->incoming_transmittal_id) ? $header->incoming_transmittal_id : ""
+            ));
+            
+            
             /* ----------
              Modal Fields
             ----------------------- */
@@ -482,6 +966,7 @@ class IncomingController extends Controller
     }
 
     public function save(Request $request) {
+
         try {
             $dataConfig     = $this->sysModel->getConfig();
             $extention      = $dataConfig->attachment_extention;
@@ -654,12 +1139,30 @@ class IncomingController extends Controller
             ----------------------- */
             $data["header"]        = $this->qIncoming->getHeader($id);
             $data["detail"]        = $this->qIncoming->getDetail($id);
+            
+            
+            
+            $data["items"] = $this->qIncoming->getItemTemp(); // pakai fungsi yang sama dengan add
+
+        // Pastikan attach_url & delete_url sama
+        $data["attach_url"] = "/incoming/attach_item";
+        $data["delete_url"] = "/incoming/delete_item";
+            
+            
             # ---------------
             $file                  = asset("/uploads").$data["header"]->receipt_url . $data["header"]->receipt_file;
             $delete_file           = url('')."/incoming/delete_receipt/" . $id_enc;
             /* ----------
              Fields
             ----------------------- */
+            
+            
+            
+            $data["fields"][] = form_hidden(array(
+            "name" => "incoming_transmittal_id",
+            "value" => $data["header"]->incoming_transmittal_id
+        ));
+            
             $data["fields"][]      = form_hidden(array("name"=>"incoming_transmittal_id", "label"=>"Incoming ID", "mandatory"=>"yes", "readonly"=>"readonly", "value"=>$data["header"]->incoming_transmittal_id));
             $data["fields"][]      = form_text(array("name"=>"incoming_no", "label"=>($this->isVendor == "YES") ? "Outgoing Number" : "Incoming Number", "mandatory"=>"yes", "value"=>$data["header"]->incoming_no));
             $data["fields"][]      = form_datepicker(array("name"=>"receive_date", "label"=>($this->isVendor == "YES") ? "Sending Date" : "Receive Date", "mandatory"=>"yes", "value"=>displayDMY($data["header"]->receive_date, "/")));
@@ -677,7 +1180,8 @@ class IncomingController extends Controller
             $data["buttons"][]     = form_button_submit(array("name"=>"button_save", "label"=>"&nbsp;&nbsp;Update&nbsp;&nbsp;"));
             $data["buttons"][]     = form_button_cancel(array("name"=>"button_cancel", "label"=>"Cancel"));
             # ---------------
-            return view("incoming.form-edit", $data);
+            //return view("incoming.form-edit", $data);
+            return view("incoming.form-add-with-ifi-contruction", $data);
         } catch (\Exception $e) {
             $this->logModel->createError($e->getMessage(), "PAGE USER", "");
             # ---------------
@@ -704,7 +1208,28 @@ class IncomingController extends Controller
         }
     }
 
-    public function update(Request $request) {
+    public function updatexxx(Request $request) {
+       // dd($_FILES);die;
+        /*
+          "_token" => "D7AVGIR0uhTYDHwONHVkDNv3LKsfqnpdhTpEu7Ph"
+  "vendor_id" => "1"
+  "incoming_no" => "AUTO-20260309113828"
+  "receive_date" => "09/03/2026"
+  "sender_date" => "09/03/2026"
+  "subject" => "REVISION REQUIRED - A001"
+  "return_date_plan" => "09/03/2026"
+  "return_date_actual" => "09/03/2026"
+  "description" => ""
+  "incoming_transmittal_id" => "7"
+  "button_save" => ""
+  "text_row_attachment" => "1"
+  "document_id" => "1"
+  "issue_status_id" => "0"
+  "document_status_id" => "0"
+  "return_status_id" => ""
+  "remark" => ""
+  */
+  
         try {
             $rules = array(
                 'incoming_no' => 'required|',
@@ -737,10 +1262,48 @@ class IncomingController extends Controller
             return view("error.405");
         }
     }
+    
+    public function update(Request $request) {
+    try {
+        $id = $request->incoming_transmittal_id; // wajib dari hidden field
+
+        $rules = [
+            'incoming_no' => 'required|unique:incoming_transmittal,incoming_no,' . $id . ',incoming_transmittal_id',
+        ];
+        $messages = [
+            'incoming_no.required' => 'Outgoing/Incoming number wajib diisi',
+            'incoming_no.unique'   => 'Nomor sudah dipakai',
+        ];
+
+        // Validasi receipt kalau di-upload
+        if ($request->hasFile('receipt')) {
+            $rules['receipt'] = 'file|mimes:pdf,jpg,png,doc,docx|max:10240';
+        }
+
+        $validator = Validator::make($request->all(), $rules, $messages);
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput();
+        }
+
+        // Panggil model untuk update (kita buat fungsi baru atau modifikasi updateIncoming)
+        $response = $this->qIncoming->updateIncomingWithAttach($request, $id);
+
+        if ($response["status"]) {
+            session()->flash("success_message", "Update berhasil, termasuk file attach baru.");
+        } else {
+            session()->flash("error_message", $response["message"] ?? "Gagal update");
+        }
+
+        return redirect("/incoming/index"); // atau /vendor_outgoing/index
+    } catch (\Exception $e) {
+        $this->logModel->createError($e->getMessage(), "UPDATE INCOMING FAILED", "");
+        return view("error.405");
+    }
+}
 
     public function approve($id) {
         try {
-            $data["title"]         = "Approve Incoming Transmittal";
+            $data["title"]         = "Internal Document Check (IDC)";
             $data["parent"]        = ucwords(strtolower($this->PROT_Parent));
             $data["form_act"]      = "/incoming/save_approve";
             # ---------------
@@ -764,6 +1327,7 @@ class IncomingController extends Controller
                 return redirect("/incoming/index");
             }
             # ---------------
+            //dd($data["header"]->issue_status_id);
             if($data["header"]->issue_status_id != 1) {
             $data["fields"][]      = form_hidden(array("name"=>"id", "label"=>"ID", "mandatory"=>"yes", "readonly"=>"readonly", "value"=>$id));
             $data["fields"][]      = form_hidden(array("name"=>"vendor_email", "label"=>"Vendor Email", "readonly"=>"readonly", "value"=>$data["header"]->email_address));
@@ -887,15 +1451,25 @@ class IncomingController extends Controller
         return Datatables::of($query)->make(true); 
     }
 
-    public function get_document_status($id)
-    {
-        $tipe = DB::table("ref_document_status")->select('document_status_id AS id', 'name AS name')
-                                                ->where('issue_status_id', $id)
-                                                ->where('status', 1)
-                                                ->get(['id', 'name']);
+public function get_document_status_old($id)
+{
+    $tipe = DB::table("ref_document_status")
+        ->select('document_status_id AS id', 'name AS name')
+        ->where('status', 1)
+        ->orderByRaw("CAST(name AS UNSIGNED) ASC")
+        ->get();
 
-        return response()->json(['data' => $tipe->toArray()]);
-    }
+    return response()->json(['data' => $tipe->toArray()]);
+}
+
+
+
+public function get_document_status($id)
+{
+    $tipe = $this->qReference->getSelectDocumentStatusInternal();
+
+    return response()->json(['data' => $tipe]);
+}
 
     public function add_idc() {
         try {

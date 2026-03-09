@@ -221,6 +221,7 @@ class OutgoingController extends Controller
             $data["buttons"][]     = form_button_submit(array("name"=>"button_search", "label"=>"&nbsp;&nbsp;Search&nbsp;&nbsp;"));
             $data["buttons"][]     = form_action_button(array("name"=>"button_clear", "label"=>"&nbsp;&nbsp;Clear&nbsp;&nbsp;", "url"=>($this->isVendor == "YES") ? "/vendor_incoming/unfilter" : "/outgoing/unfilter"));
             # ---------------
+            //echo 'xx';die;
             return view("default.list", $data);
         } catch (\Exception $e) {
             throw $e;
@@ -439,6 +440,7 @@ class OutgoingController extends Controller
     }
 
     public function editdetail($id) {
+		
         try {
             $data["title"]         = "Edit Outgoing Transmittal";
             $data["parent"]        = ucwords(strtolower($this->PROT_Parent));
@@ -517,15 +519,22 @@ class OutgoingController extends Controller
     }
 
     public function updatedetail(Request $request) {
+        
         try {
             // $this->qOutgoing->printOutgoing($request);
             // $this->qOutgoing->printReviewResult($request);
             $response   = $this->qOutgoing->updateOutgoingDetail($request);
+            
+            // dd($request);
+            // echo 'xx';die;
+            
             if($response["status"]) {
                 session()->flash("success_message", SUCCESS_MESSAGE);
             } else {
                 session()->flash("error_message", FAILED_MESSAGE);
             }
+            
+            
             # ---------------
             return redirect("/outgoing/index");
         } catch (\Exception $e) {

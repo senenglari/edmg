@@ -27,90 +27,77 @@ class CommentsModel extends Model
         $this->sysModel     = new SysModel;
     }
 
-    public function getCollections()
-    {
-        try {
-            \DB::enableQueryLog();
-            $query  = DB::table($this->table)
-                            ->select(
-                                "$this->table.*",
-                                "d.project_name",
-                                "y.document_no",
-                                "y.document_title",
-                                "a.name as document_type_name",
-                                "b.name as vendor_name",
-                                "c.name as area_name",
-                                "d.project_name",
-                                "f.name as issue_status",
-                                DB::RAW("DATE_FORMAT(y.deadline, '%d/%m/%Y') AS t_end_date")
-                            )
-                            ->join("assignment as z", "$this->table.assignment_id", "z.assignment_id")
-                            // ->join("document as y", "z.document_id", "y.document_id")
+public function getCollections()
+{
+    $query = DB::table($this->table)
+        ->select(
+            "$this->table.comment_id",
+            "$this->table.assignment_id",
+            "$this->table.user_id",
+            "$this->table.role",
+            "$this->table.status",
+            "y.document_no",
+            "y.document_title",
+            "a.name as document_type_name",
+            "b.name as vendor_name",
+            "c.name as area_name",
+            "d.project_name",
+            "f.name as issue_status",
+            DB::RAW("DATE_FORMAT(y.deadline, '%d/%m/%Y') AS t_end_date")
+        )
 
-                            ->join('document as y', function ($join) {
-                                $join->on("z.document_id", "y.document_id");
-                                $join->on("y.incoming_transmittal_detail_id", "z.incoming_transmittal_detail_id");
-                            })
+        ->join("assignment as z", "$this->table.assignment_id", "z.assignment_id")
 
-                            ->leftjoin("incoming_transmittal_detail", "z.incoming_transmittal_detail_id", "incoming_transmittal_detail.incoming_transmittal_detail_id")
-                            ->leftjoin("incoming_transmittal", "incoming_transmittal_detail.incoming_transmittal_id", "incoming_transmittal.incoming_transmittal_id")
-                            
-                            ->leftjoin("ref_document_type as a", "y.document_type_id", "a.document_type_id")
-                            ->leftjoin("ref_vendor as b", "y.vendor_id", "b.vendor_id")
-                            ->leftjoin("ref_area as c", "y.area_id", "c.area_id")
-                            ->leftjoin("project as d", "y.project_id", "d.project_id")
-                            ->leftjoin("ref_issue_status as f", "y.issue_status_id", "f.issue_status_id")
-                            ->where("$this->table.user_id", Auth::user()->id)
-                            ->where("$this->table.status", 1)
-                            ->where("y.status", 2)
-                            ->where("y.issue_status_id", "!=", 1)
-                            ->where("$this->table.status_nonaktif", "!=", 1)
+        ->join("document as y", function ($join) {
+            $join->on("z.document_id", "y.document_id");
+            $join->on("y.incoming_transmittal_detail_id", "z.incoming_transmittal_detail_id");
+        })
 
-                            ->where("incoming_transmittal.status", "!=", 3)
+        ->leftjoin("incoming_transmittal_detail", "z.incoming_transmittal_detail_id", "incoming_transmittal_detail.incoming_transmittal_detail_id")
+        ->leftjoin("incoming_transmittal", "incoming_transmittal_detail.incoming_transmittal_id", "incoming_transmittal.incoming_transmittal_id")
 
-                            // ->whereRaw("(comment.status = 1 OR (comment.status < 2 AND comment.role='APPROVER'))")
-                            ->orderBy("$this->table.comment_id", "ASC");
+        ->leftjoin("ref_document_type as a", "y.document_type_id", "a.document_type_id")
+        ->leftjoin("ref_vendor as b", "y.vendor_id", "b.vendor_id")
+        ->leftjoin("ref_area as c", "y.area_id", "c.area_id")
+        ->leftjoin("project as d", "y.project_id", "d.project_id")
+        ->leftjoin("ref_issue_status as f", "y.issue_status_id", "f.issue_status_id")
 
+        ->where("$this->table.user_id", Auth::user()->id)
 
-            if (session()->has("SES_SEARCH_COMMENTS_PROJECT_NAME") != "") {
-                $query->where("d.project_name", "LIKE", "%" . session()->get("SES_SEARCH_COMMENTS_PROJECT_NAME") . "%");
-            }
+        ->where(function($q){
 
-            if (session()->has("SES_SEARCH_COMMENTS_NO") != "") {
-                $query->where("y.document_no", "LIKE", "%" . session()->get("SES_SEARCH_COMMENTS_NO") . "%");
-            }
+            $q->where("comment.role","REVIEWER")
 
-            if (session()->has("SES_SEARCH_COMMENTS_TITLE") != "") {
-                $query->where("y.document_title", "LIKE", "%" . session()->get("SES_SEARCH_COMMENTS_TITLE") . "%");
-            }
+            ->orWhere(function($q2){
 
-            if (session()->has("SES_SEARCH_COMMENTS_TYPE")) {
-                if (session()->get("SES_SEARCH_COMMENTS_TYPE") != "0") {
-                    $query->where("y.document_type_id", session()->get("SES_SEARCH_COMMENTS_TYPE"));
-                }
-            }
+                $q2->where("comment.role","APPROVER")
+                   ->whereRaw("
+                        NOT EXISTS (
+                            SELECT 1
+                            FROM comment c2
+                            WHERE c2.assignment_id = comment.assignment_id
+                            AND c2.role = 'REVIEWER'
+                            AND c2.status != 2
+                        )
+                   ");
 
-            if (session()->has("SES_SEARCH_COMMENTS_VENDOR")) {
-                if (session()->get("SES_SEARCH_COMMENTS_VENDOR") != "0") {
-                    $query->where("y.vendor_id", session()->get("SES_SEARCH_COMMENTS_VENDOR"));
-                }
-            }
+            });
 
-            if (session()->has("SES_SEARCH_COMMENTS_AREA")) {
-                if (session()->get("SES_SEARCH_COMMENTS_AREA") != "0") {
-                    $query->where("y.area_id", session()->get("SES_SEARCH_COMMENTS_AREA"));
-                }
-            }
-            
-            $result = $query->paginate(PAGINATION);
-            // dd(\DB::getQueryLog());
-            return array("status" => true, "data" => $result);
-        } catch (\Exception $e) {
-            throw $e;
-            return array("status" => false, "data" => []);
-        }
-    }
+        })
 
+        ->where("comment.status", 1)
+        ->whereIn("y.status", [2,3])
+        ->where("comment.status_nonaktif", "!=", 1)
+        ->where("incoming_transmittal.status", "!=", 3)
+
+        ->orderBy("comment.comment_id", "ASC");
+
+    $data = $query->paginate(10);
+
+    return [
+        "data" => $data
+    ];
+}
     public function getHeader($id)
     {
         $query  = DB::table($this->table)
@@ -192,249 +179,337 @@ class CommentsModel extends Model
         return $query;
     }
 
-    public function saveComments($request) {
-        DB::beginTransaction();
-        # ------------------------
-        try {
-            if($request->status_approval=="APPROVER") {
-                DB::table($this->table)
-                    ->where("$this->primaryKey", $request->idData)
+
+
+
+
+public function saveComments_oldd($request)
+{
+    DB::beginTransaction();
+
+    try {
+
+        if ($request->status_approval == "APPROVER") {
+
+            DB::table($this->table)
+                ->where($this->primaryKey, $request->idData)
+                ->update([
+                    "remark" => $request->remark,
+                    "issue_status_id" => $request->issue_status_id,
+                    "return_status_id" => $request->return_status_id,
+                    "status" => 2,
+                    "updated_by" => Auth::id(),
+                    "updated_at" => now()
+                ]);
+
+            DB::table("incoming_transmittal_detail")
+                ->where("incoming_transmittal_detail_id", $request->incoming_transmittal_detail_id)
+                ->update([
+                    "issue_status_id" => $request->issue_status_id
+                ]);
+
+            /* ======================================================
+               WORKFLOW DOCUMENT STATUS
+               ====================================================== */
+//dd($request->return_status_id);
+            if ($request->return_status_id == RETURN_REJECT) {
+
+                $rejectStatus = getNextStatusReject($request->issue_status_id);
+
+                DB::table("document")
+                    ->where("document_id", $request->document_id)
                     ->update([
-                        "remark"=>$request->remark,
-                        "issue_status_id"=>$request->issue_status_id,
-                        "return_status_id"=>$request->return_status_id,
-                        "status"=>2,
-                        "updated_by"=>Auth::user()->id,
-                        "updated_at"=>now()
-                    ]);
-                /* -------------
-                Karena paralel, jadi biar tetap tercatat siapa yg tidak comment
-                DB::table($this->table)
-                    ->where("$this->table.assignment_id", $request->assignment_id)
-                    ->where("$this->table.order_no", "<", $request->order_no)
-                    ->where("$this->table.status", "<", 2)
-                    ->update([ "status"=>2 ]);
-                ------------------- */
-
-                DB::table("incoming_transmittal_detail")
-                    ->where("incoming_transmittal_detail_id", $request->incoming_transmittal_detail_id)
-                    ->update([
-                        "issue_status_id"=>$request->issue_status_id
+                        "issue_status_id" => $rejectStatus,
+                        "status" => 2
                     ]);
 
-                // if($request->issue_status_id==4) {
-                //     /* -------------
-                //     JIKA AFC (MAU NAIK KE PAK JATI)
-                //     ----------------------- */
-                //         DB::table("document")
-                //             ->where("document_id", $request->document_id)
-                //             ->update([
-                //                 "issue_status_id"=>$request->issue_status_id,
-                //                 "created_approved_by"=>Auth::user()->id,
-                //                 "created_approved_at"=>now(),
-                //                 "document_status_id"=>DEFAULT_REVISION_NUMBER_AFC,
-                //                 "status"=>5 // WAITING FOR APPROVAL (PAK JATI)
-                //             ]);
-                //     /* ----------
-                //      Send Email
-                //     ----------------------- */
-                //         if($this->sysModel->getConfig()->email_status == 1) {
-                //             $qDataNextApproval  = DB::table("document")
-                //                                     ->select("*", "sys_users.email", "sys_users.full_name")
-                //                                     ->leftjoin("sys_users", "sys_users.id", "=", "document.approved_by")
-                //                                     ->where("document_id", $request->document_id)
-                //                                     ->first();
-                            
-                //             if(!empty($qDataNextApproval)) {
-                //                 $title              = "Approved for Construction Notification";
-                //                 $emailsAddress      = $qDataNextApproval->email;
-                //                 $fullName           = $qDataNextApproval->full_name;
-                //                 $data["title"]      = "Approved for Construction Notification";
-                //                 $data["content"]    = DB::table("incoming_transmittal_detail")
-                //                                             ->select("document.document_no", "document.document_title"
-                //                                                     , "ref_document_status.name AS document_status_name", "ref_issue_status.name AS issue_status_name")
-                //                                           ->join("document", "incoming_transmittal_detail.document_id", "document.document_id")
-                //                                           ->leftJoin("ref_document_status", "incoming_transmittal_detail.document_status_id", "ref_document_status.document_status_id")
-                //                                           ->leftJoin("ref_issue_status", "incoming_transmittal_detail.issue_status_id", "ref_issue_status.issue_status_id")
-                //                                           ->where("incoming_transmittal_detail.incoming_transmittal_detail_id", $request->incoming_transmittal_detail_id)
-                //                                           ->get();
+                /* ======================================================
+                   AUTO CREATE OUTGOING TRANSMITTAL DRAFT
+                   ====================================================== */
 
-                //                 # ---------------
-                //                 Mail::send('email.approval-notification', $data, function($message) use ($title, $emailsAddress, $fullName){
-                //                     $message->to($emailsAddress, $fullName)->subject($title);
-                //                     # ---------------
-                //                     $message->from(env("MAIL_USERNAME"), 'Automatic Mail System');
-                //                 });
-                //             }
-                //         }
-                // } else if($request->issue_status_id==12) {
-                //     /* -------------
-                //     JIKA AFD (SEBELUM PROSES KE PAK JATI)
-                //     ----------------------- */
-                //         DB::table("document")
-                //             ->where("document_id", $request->document_id)
-                //             ->update([
-                //                 "issue_status_id"=>$request->issue_status_id,
-                //                 "document_status_id"=>DEFAULT_REVISION_NUMBER_IFU,
-                //                 "status"=>5, // WAITING FOR APPROVAL (PAK JATI)
-                //                 "approved_design_by"=>$request->approved_design_by,
-                //                 "created_design_by"=>Auth::user()->id,
-                //                 "created_design_at"=>now(),
-                //                 "created_approved_by"=>Auth::user()->id,
-                //                 "created_approved_at"=>now()
-                //             ]);
-                //     /* ----------
-                //      Send Email
-                //     ----------------------- */
-                //         if($this->sysModel->getConfig()->email_status == 1) {
-                //             $qDataNextApproval  = DB::table("sys_users")
-                //                                     ->select("sys_users.email", "sys_users.full_name")
-                //                                     ->where("id", $request->approved_design_by)
-                //                                     ->first();
+                $doc = DB::table("document")
+                    ->where("document_id", $request->document_id)
+                    ->first();
 
-                //             if(!empty($qDataNextApproval)) {
-                //                 $title              = "Approved for Design Notification";
-                //                 $emailsAddress      = $qDataNextApproval->email;
-                //                 $fullName           = $qDataNextApproval->full_name;
-                //                 $data["title"]      = "Approved for Design Notification";
-                //                 $data["content"]    = DB::table("incoming_transmittal_detail")
-                //                                             ->select("document.document_no", "document.document_title"
-                //                                                     , "ref_document_status.name AS document_status_name", "ref_issue_status.name AS issue_status_name")
-                //                                           ->join("document", "incoming_transmittal_detail.document_id", "document.document_id")
-                //                                           ->leftJoin("ref_document_status", "incoming_transmittal_detail.document_status_id", "ref_document_status.document_status_id")
-                //                                           ->leftJoin("ref_issue_status", "incoming_transmittal_detail.issue_status_id", "ref_issue_status.issue_status_id")
-                //                                           ->where("incoming_transmittal_detail.incoming_transmittal_detail_id", $request->incoming_transmittal_detail_id)
-                //                                           ->get();
+                if ($doc) {
 
-                //                 # ---------------
-                //                 Mail::send('email.approval-notification', $data, function($message) use ($title, $emailsAddress, $fullName){
-                //                     $message->to($emailsAddress, $fullName)->subject($title);
-                //                     # ---------------
-                //                     $message->from(env("MAIL_USERNAME"), 'Automatic Mail System');
-                //                 });          
-                //             }
-                //         }
-                // } else if($request->issue_status_id==13) {
-                if($request->issue_status_id==13) {
-                    /* -------------
-                    JIKA IFI & IFI LAGI MAKA DONE
-                    ----------------------- */
-                        DB::table("document")
-                            ->where("document_id", $request->document_id)
-                            ->update([
-                                "status"=>6,
-                            ]);
-                } else if($request->issue_status_id==1) {
-                    /* -------------
-                    JIKA IDC MAKA STATUS DONE
-                    ----------------------- */
-                        DB::table("document")
-                            ->where("document_id", $request->document_id)
-                            ->update([
-                                "status"=>6,
-                            ]);
-                } else {
-                    /* -------------
-                    WATING FOR COMPILER
-                    ----------------------- */
-                        DB::table("document")
-                            ->where("document_id", $request->document_id)
-                            ->update([
-                                "issue_status_id"=>$request->issue_status_id,
-                                "status"=>3
-                            ]);
-                }                
+                    $transmittalId = DB::table("outgoing_transmittal")->insertGetId([
+                        "project_id" => $doc->project_id,
+                        "vendor_id" => $doc->vendor_id,
+                        "outgoing_no" => "AUTO-REV-" . date("YmdHis"),
+                        "subject" => "REVISION REQUIRED - " . $doc->document_no,
+                        "content" => "Please upload revised document based on review comments",
+                        "status_code" => 0, // draft
+                        "created_by" => Auth::id(),
+                        "created_at" => now()
+                    ]);
+
+                    DB::table("outgoing_transmittal_detail")->insert([
+                        "outgoing_transmittal_id" => $transmittalId,
+                        "incoming_transmittal_detail_id" => $request->incoming_transmittal_detail_id,
+                        "created_at" => now()
+                    ]);
+
+                }
+
             } else {
-                /* -------------
-                PROSES REVIEWER (NEXT STEP)
-                ----------------------- */
-                    DB::table($this->table)
-                        ->where("$this->primaryKey", $request->idData)
+
+                $approveStatus = getNextStatusApprove($request->issue_status_id);
+
+                if ($approveStatus == STATUS_DONE) {
+
+                    DB::table("document")
+                        ->where("document_id", $request->document_id)
                         ->update([
-                            "remark"=>$request->remark,
-                            "return_status_id"=>$request->return_status_id,
-                            "status"=>2,
-                            "updated_by"=>Auth::user()->id,
-                            "updated_at"=>now()
+                            "issue_status_id" => $approveStatus,
+                            "status" => 6
                         ]);
+
+                } else {
+
+                    DB::table("document")
+                        ->where("document_id", $request->document_id)
+                        ->update([
+                            "issue_status_id" => $approveStatus,
+                            "status" => 3
+                        ]);
+
+                }
+
             }
 
-            /* ----------
-             Upload File
-            ----------------------- */
-                $file_url   = "";
-                $file_name  = "";
-                $username   = setString(Auth::user()->name);
-                # ------------------------
-                if(!empty($request->document_file)) {
-                    $file_content   = file_get_contents($request->document_file->getRealPath());
-                    $file_url       = DOCUMENT_DIR_COMMENT . "/" . $request->document_id . "/";
-                    # ------------------------
-                    $file_name      = $username . "_" .  $request->document_id . "_" . $request->idData . "." . $request->document_file->getClientOriginalExtension();
-                    # ------------------------
-                    Storage::disk("uploads")->put($file_url . $file_name, $file_content);
-                    # ------------------------
-                    DB::table($this->table)
-                        ->where("$this->primaryKey", $request->idData)
-                        ->update([
-                            "document_url"=>$file_url,
-                            "document_file"=>$file_name,
-                        ]);
+        } else {
 
-                    DB::table("assignment")
-                        ->where("assignment.assignment_id", $request->assignment_id)
-                        ->update([
-                            "document_url"=>$file_url,
-                            "document_file"=>$file_name,
-                        ]);
-                }
-            /* ----------
-             Upload File 2
-            ----------------------- */
-                $file_url   = "";
-                $file_name  = "";
-                # ------------------------
-                if(!empty($request->document_file_2)) {
-                    $file_content   = file_get_contents($request->document_file_2->getRealPath());
-                    $file_url       = DOCUMENT_DIR_COMMENT . "/" . $request->document_id . "/";
-                    # ------------------------
-                    $file_name      = $username. "_CRS_" .  $request->document_id . "_" . $request->idData . "." . $request->document_file_2->getClientOriginalExtension();
-                    # ------------------------
-                    Storage::disk("uploads")->put($file_url . $file_name, $file_content);
-                    # ------------------------
-                    DB::table($this->table)
-                        ->where("$this->primaryKey", $request->idData)
-                        ->update([
-                            "document_url"=>$file_url,
-                            "document_file_2"=>$file_name,
-                        ]);
+            DB::table($this->table)
+                ->where($this->primaryKey, $request->idData)
+                ->update([
+                    "remark" => $request->remark,
+                    "return_status_id" => $request->return_status_id,
+                    "status" => 2,
+                    "updated_by" => Auth::id(),
+                    "updated_at" => now()
+                ]);
 
-                    DB::table("assignment")
-                        ->where("assignment.assignment_id", $request->assignment_id)
-                        ->update([
-                            "document_url"=>$file_url,
-                            "document_file_2"=>$file_name,
-                        ]);
-                }
-            /* ----------
-             Logs
-            ----------------------- */
-                $this->logModel->createLog("UPDATE COMMENTS (" . $request->idData . ")", Auth::user()->id, $request);
-            # ------------------------
-            DB::commit();
-            # ------------------------
-            return array("status"=>true, "id"=>0);
-        } catch (\Exception $e) {
-            DB::rollback();
-            throw $e;
-            /* ----------
-             Error
-            ----------------------- */
-            $id    = $this->logModel->createError($e->getMessage(), "UPDATE COMMENTS FAILED", "");
-            # ---------------
-            return array("status"=>false, "id"=>0);
         }
+
+        /* ======================================================
+           LOG
+           ====================================================== */
+
+        $this->logModel->createLog(
+            "UPDATE COMMENTS (" . $request->idData . ")",
+            Auth::id(),
+            $request
+        );
+
+        DB::commit();
+
+        return ["status" => true, "id" => 0];
+
+    } catch (\Exception $e) {
+
+        DB::rollback();
+
+        $this->logModel->createError(
+            $e->getMessage(),
+            "UPDATE COMMENTS FAILED",
+            ""
+        );
+
+        return ["status" => false, "id" => 0];
     }
+}
+
+
+
+
+
+public function saveComments($request)
+{
+
+    DB::beginTransaction();
+
+    try {
+
+        if ($request->status_approval == "APPROVER") {
+
+            /* ===============================
+               UPDATE COMMENT
+            =============================== */
+
+            DB::table($this->table)
+                ->where($this->primaryKey, $request->idData)
+                ->update([
+                    "remark" => $request->remark,
+                    "issue_status_id" => $request->issue_status_id,
+                    "return_status_id" => $request->return_status_id,
+                    "status" => 2,
+                    "updated_by" => Auth::id(),
+                    "updated_at" => now()
+                ]);
+
+            DB::table("incoming_transmittal_detail")
+                ->where("incoming_transmittal_detail_id", $request->incoming_transmittal_detail_id)
+                ->update([
+                    "issue_status_id" => $request->issue_status_id
+                ]);
+
+
+            /* ===============================
+               CHECK REVISION FLOW
+            =============================== */
+
+            if (
+                $request->issue_status_id == STATUS_RE_IFC ||
+                $request->issue_status_id == STATUS_RE_IFA
+            ) {
+
+                /* ---------- UPDATE DOCUMENT ---------- */
+
+                DB::table("document")
+                    ->where("document_id", $request->document_id)
+                    ->update([
+                        "issue_status_id" => $request->issue_status_id,
+                        "status" => 2
+                    ]);
+
+
+                /* =====================================
+                   AUTO CREATE OUTGOING TRANSMITTAL
+                ===================================== */
+
+$doc = DB::table("document")
+    ->where("document_id", $request->document_id)
+    ->first();
+
+if ($doc) {
+
+    $transmittalId = DB::table("outgoing_transmittal")->insertGetId([
+
+        "outgoing_no" => "AUTO-REV-" . date("YmdHis"),
+        "sender_date" => NULL,
+
+        "vendor_id" => $doc->vendor_id,
+        "project_id" => $doc->project_id,
+
+        "email_address" => "",
+        "cc_email_address" => "",
+
+        "subject" => "REVISION REQUIRED - " . $doc->document_no,
+        "content" => "Please upload revised document",
+
+        "status_email" => 0,
+
+        "created_by" => Auth::id(),
+        "created_at" => now()
+    ]);
+
+// dd($transmittalId);
+
+
+    // "return_status_id" => 0,
+    // "issue_status_id" => 0,
+    // "document_status_id" => 0,
+
+DB::table("outgoing_transmittal_detail")->insert([
+    "outgoing_transmittal_id" => $transmittalId,
+    "incoming_transmittal_detail_id" => $request->incoming_transmittal_detail_id,
+
+
+    "return_status_id"   => RETURN_COMMENT,      // 3
+    "issue_status_id"    => $request->issue_status_id,  // RE-IFC = 2
+    "document_status_id" => $request->document_status_id,
+
+    "document_url" => null,
+    "document_file" => null,
+    "document_file_2" => null,
+    "document_crs" => null
+]);
+
+}
+
+
+            } else {
+
+                /* ===============================
+                   APPROVE FLOW (EXTERNAL)
+                =============================== */
+
+                $approveStatus = getNextStatusApprove($request->issue_status_id);
+
+                if ($approveStatus == STATUS_DONE) {
+
+                    DB::table("document")
+                        ->where("document_id", $request->document_id)
+                        ->update([
+                            "issue_status_id" => $approveStatus,
+                            "status" => 6
+                        ]);
+
+                } else {
+
+                    DB::table("document")
+                        ->where("document_id", $request->document_id)
+                        ->update([
+                            "issue_status_id" => $approveStatus,
+                            "status" => 3
+                        ]);
+
+                }
+
+            }
+
+        } else {
+
+            /* ===============================
+               NON APPROVER COMMENT
+            =============================== */
+
+            DB::table($this->table)
+                ->where($this->primaryKey, $request->idData)
+                ->update([
+                    "remark" => $request->remark,
+                    "return_status_id" => $request->return_status_id,
+                    "status" => 2,
+                    "updated_by" => Auth::id(),
+                    "updated_at" => now()
+                ]);
+
+        }
+
+
+        /* ===============================
+           LOG
+        =============================== */
+
+        $this->logModel->createLog(
+            "UPDATE COMMENTS (" . $request->idData . ")",
+            Auth::id(),
+            $request
+        );
+
+
+        DB::commit();
+
+        return ["status" => true, "id" => 0];
+
+    } catch (\Exception $e) {
+
+        DB::rollback();
+
+        $this->logModel->createError(
+            $e->getMessage(),
+            "UPDATE COMMENTS FAILED",
+            ""
+        );
+
+        return ["status" => false, "id" => 0];
+    }
+}
+
+
+
+
 
     public function download_versi_windows($user_id) {
         try {

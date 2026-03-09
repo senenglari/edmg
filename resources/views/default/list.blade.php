@@ -41,18 +41,34 @@
                         @endif
                     </div>
                     <div class="panel-body">
+                        
+
+                        
+                        
                         @if (empty($hide_simple_search))
                         <div class="col-md-3 pull-right" style="position: absolute; right: 0; margin-right: 10px;">
                             <input type="text" class="form-control" placeholder="Search ..." name="text_search" id="text_search" value="{{ $text_search }}">
                         </div>
                         @endif
                         <p>
+                            
+
+                            
                             @php
                             $isSingle = "FALSE";
                             @endphp
 
                             @foreach ($action as $action_menu)
-                            {!! getActionButton($action_menu->name, $action_menu->url, $action_menu->icon) !!}
+
+
+                        @php
+                        $label = $action_menu->name;
+                        if($label == 'Approve'){
+                            $label = 'IDC';
+                        }
+                        @endphp
+                        
+                        {!! getActionButton($label, $action_menu->url, $action_menu->icon) !!}        
 
                             @php
                             $var = explode("|", $action_menu->icon);
@@ -65,6 +81,12 @@
                             @endif
 
                             @endforeach
+                            
+                            {{-- tombol trigger reviewer --}}
+<a href="{{ url('comments/force-close') }}"
+class="btn btn-sm btn-danger m-b-5">
+<i class="fa fa-check"></i> Force Reviewerx
+</a>
 
                             @if (!empty($adv_search))
                             <a href="javascript:;" class="btn btn-sm btn-success m-b-5" id="search-panel-botton"><i class="fa fa-search"></i></a>
@@ -107,17 +129,33 @@
                                         <tr>
                                             @foreach ($table_header as $row)
                                             @php ($field = $row["name"]) @endphp
-
+                                            
                                             <td style="width:{{ $row["width"] }}; text-align:{{ $row["item-align"] }};">
                                                 @if ($row["item-format"] == "number")
                                                 {{ number_format($rs->$field, 0) }}
                                                 @elseif ($row["item-format"] == "flag")
-                                                {!! getLabelFlag($rs->$field) !!}
+
+@if($field == 'vendor_status_code' && empty($rs->rec_date))
+<a href="add/{{ encodedData($rs->incoming_transmittal_id) }}">
+    <span class="label label-warning">Draft</span>
+</a>
+@else
+{!! getLabelFlag($rs->$field) !!}
+@endif
+
                                                 @elseif ($row["item-format"] == "checkbox")
                                                 <input type="checkbox" id="checkbox_id_<?= $No ?>" name="checkbox_id[]" class="checkbox_id" value="{{ encodedData($rs->$field) }}">
                                                 @elseif ($row["item-format"] == "checkbox")
                                                 @else
-                                                {{ $rs->$field }}
+                                                @if($field == 'vendor_status_code')
+                                                    @if(empty($rs->rec_date))
+                                                        <span class="label label-warning">Draft</span>
+                                                    @else
+                                                        {{ $rs->$field }}
+                                                    @endif
+                                                @else
+                                                    {{ $rs->$field }}
+                                                @endif
                                                 @endif
                                             </td>
                                             @endforeach

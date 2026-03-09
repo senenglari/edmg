@@ -13,7 +13,7 @@ function encodedData($var) {
    	return base64_encode($enc);
 }
 
-function decodedData($var) {
+function decodedDataOld($var) {
 	$dec = decryptData(
                 base64_decode($var),
                 ENCODE_ID,
@@ -21,6 +21,21 @@ function decodedData($var) {
             );
 
    	return $dec["key"];
+}
+
+function decodedData($var)
+{
+    $dec = decryptData(
+        base64_decode($var),
+        ENCODE_ID,
+        ENCODE_SECRET
+    );
+
+    if (!is_array($dec) || !isset($dec['key'])) {
+        return null;
+    }
+
+    return $dec['key'];
 }
 
 function encryptData(array $json_data, $cid, $secret) {
@@ -36,8 +51,19 @@ function decryptData($hased_string, $cid, $secret) {
 	return null;
 }
 
-function tsDiff($ts) {
+function tsDiff_old($ts) {
 	return abs($ts - time()) <= 48000000000;
+}
+
+function tsDiff($ts)
+{
+    if (!is_numeric($ts)) {
+        return false;
+    }
+
+    $ts = (int) $ts;
+
+    return abs($ts - time()) <= 48000000000;
 }
 
 function doubleEncrypt($string, $cid, $secret) {

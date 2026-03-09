@@ -7,6 +7,95 @@ header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Expires: 0");
 
+
+                // $_SESSION['user_id']   = 1;
+                // $_SESSION['user_name'] = "admin";
+                // $_SESSION['role']      = "admin";
+				
+				//redirect to-->http://dzaries.my.id/edmg-github-clone/edmg/pdf-stamp/index.php?pdf_id=18&fileName=TMBP020231547.pdf&lpath=SjBwZWVISldKa1FlS0Vnb2FTb0tiUzhoR1V0aWVYUkhjUQ==
+				
+				
+				
+				//http://dzaries.my.id/edms/pdf-stamp
+
+
+// --- CEK HAK STAMP (admin atau user tertentu) ---
+$canStamp = false;
+
+
+$stamp = isset($_GET['stamp']) ? intval($_GET['stamp']) : 0;
+
+
+
+
+
+if(!isset($_GET['comment'])){$_GET['comment']="";} $comment=$_GET['comment'];
+
+
+// ====================== AMBIL SEMUA PARAMETER GET ======================
+$pdf_id   = $_GET['pdf_id']   ?? '';
+$fileName = $_GET['fileName'] ?? '';
+$lpath    = $_GET['lpath']    ?? '';
+$idrole   = $_GET['idrole']   ?? '0';
+$iduser   = $_GET['iduser']   ?? '0';
+$rname    = $_GET['rname']   ?? '0';
+// ====================== TENTUKAN ROLE (SESUAI GAMBAR) ======================
+if ($idrole == 49) {
+    $role = "admin";
+} else {
+    $role = "user";
+}
+
+// ====================== SET SESSION (SESUAI GAMBAR + LENGKAP) ======================
+$_SESSION['user_id']     = $iduser;
+$_SESSION['user_name']   = $rname;           // seperti di gambar kamu (bisa diubah nanti)
+$_SESSION['role']        = $role;
+$_SESSION['pdf_id']      = $pdf_id;           // diperbaiki dari "admin" di gambar
+$_SESSION['fname']       = $fileName;         // fname = fileName
+$_SESSION['lpath']       = $lpath;
+
+// Simpan juga idrole & iduser supaya lebih lengkap di index.php nanti
+$_SESSION['idrole']      = $idrole;
+$_SESSION['iduser']      = $iduser;
+$userRole=$role;
+
+
+
+
+ 
+$cek = $conn->query("SELECT id FROM list_pdf WHERE id = $pdf_id");
+
+    if ($cek->num_rows == 0) {
+        // 2. Belum ada → INSERT
+        $folder_path = "uploads/document/".$pdf_id;
+
+        $sql = "INSERT INTO list_pdf (id, file_name, folder_path, uploaded_by) 
+                VALUES ($pdf_id, '$fileName', '$folder_path', $iduser)";
+}else{
+    
+     $sql = "UPDATE list_pdf set file_name='$fileName', folder_path='$folder_path' where id='$pdf_id'";
+    
+}
+        if ($conn->query($sql) === TRUE) {
+            // berhasil insert
+            //echo "OKK";die;
+        } else {
+            // error (opsional, bisa di-log)
+            // echo "Error: " . $conn->error;
+            //echo "gagal";die;
+        }
+    
+
+
+                // $_SESSION['user_id']   = 1;
+                // $_SESSION['user_name'] = "admin";
+                // $_SESSION['role']      = "admin";
+
+if($userRole=="admin"){ $canStamp = true; }
+
+
+
+				
 // --- PROTEKSI LOGIN ---
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
@@ -17,24 +106,13 @@ $userId   = $_SESSION['user_id'];
 $userName = $_SESSION['user_name'];
 $userRole = $_SESSION['role'] ?? 'user';
 
-// --- CEK HAK STAMP (admin atau user tertentu) ---
-$canStamp = false;
-$qUser = $conn->query("SELECT can_stamp, role FROM users WHERE id = '$userId' LIMIT 1");
-if ($qUser && ($urow = $qUser->fetch_assoc())) {
-    $canStamp = ($urow['role'] === 'admin') || ((int)$urow['can_stamp'] === 1);
-} else {
-    $canStamp = ($userRole === 'admin');
-}
 
-// --- AMBIL ID PDF DARI URL ---
-$pdf_id = isset($_GET['pdf_id']) ? intval($_GET['pdf_id']) : 0;
-$stamp = isset($_GET['stamp']) ? intval($_GET['stamp']) : 0;
 
-$res = $conn->query("SELECT * FROM list_pdf WHERE id = '$pdf_id' LIMIT 1");
-$pdfData = $res ? $res->fetch_assoc() : null;
-if (!$pdfData) die("Error: Data PDF tidak ditemukan.");
 
-$fileName = $pdfData['file_name'];
+
+
+
+/*
 
 // ===== PATH KERJA (TETAP) =====
 $workPath = "storage/" . $pdf_id . "/" . $fileName;
@@ -55,6 +133,46 @@ $WORK_URL = $workPath . "?v=" . @filemtime($workPath);
 $VIEW_URL = $viewPath . "?v=" . @filemtime($viewPath);                 
 $VIEW_NAME_NOQUERY = $viewPath;                                        
 $baseUrl = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\') . '/';       
+*/
+
+
+//echo $VIEW_URL;
+// echo $WORK_URL;
+//echo "<pre>DEBUG VIEW_URL (untuk Adobe): " . htmlspecialchars($VIEW_URL) . "</pre>";
+//DEBUG VIEW_URL (untuk Adobe): storage/5/support.pdf?v=1772074155
+
+
+
+
+// $pdf_id="5";
+// $fileName="support.pdf";
+
+
+$workPath = "uploads/document/" . $pdf_id . "/" . $fileName ;
+$approvePath = "uploads/document/" . $pdf_id . "/approve/APPROVED_" . $fileName;
+$viewPath = $workPath;
+if ($stamp == 1) {
+    $viewPath = file_exists($approvePath) ? $approvePath : $workPath;
+}
+$baseUrlUpload = "uploads/document/";  // pakai symlink storage
+$workUrl = $baseUrlUpload . $pdf_id . "/" . $fileName;
+$approveUrl = $baseUrlUpload . $pdf_id . "/approve/APPROVED_" . $fileName;
+// $VIEW_URL = ($stamp == 1 ? $approveUrl : $workUrl);   
+// $WORK_URL = $VIEW_URL;       
+
+$timestamp = time();
+
+$VIEW_URL = ($stamp == 1 ? $approveUrl : $workUrl) . "?v=" . $timestamp;
+$WORK_URL = $VIEW_URL;
+
+
+$VIEW_NAME_NOQUERY = $viewPath;                                        
+$baseUrl = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\') . '/';    
+
+$FILENAME= $fileName;
+
+//echo $WORK_URL;
+
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -90,10 +208,22 @@ $baseUrl = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\') . '/';
       <?php if($stamp!=1){ ?>
       <button class="btn-save" onclick="saveToDatabase()">💾 SIMPAN</button>
       <?php } ?>
+      
+
+      
+      
       <?php if ($canStamp): ?>
         <button class="btn-download" onclick="openStampModal()">🧾 STAMP</button>
       <?php endif; ?>
-      <a class="btn-download" href="dashboard.php">Home</a>
+      <?php if($comment==1){ 
+      //https://dzaries.my.id/edms/public/comments/addcomments/SjFGamQzSlpKa1FlS0Vnb2FTb0tiUzhoR1UxamFUdw==
+      ?>
+      
+      <a class="btn-download" href="http://dzaries.my.id/edms/public/comments/addcomments/<?=$lpath;?>">Home</a>
+      <?php    
+      }else{ ?>
+      <a class="btn-download" href="http://dzaries.my.id/edms/public/document/detail/<?=$lpath;?>">Home</a>
+      <?php } ?>
     </div>
   </div>
 
@@ -169,12 +299,19 @@ const CURRENT_USER = {
 const ADOBE_KEY  = "6e754bf0041944e7b665e1d8c4b7f741";
 const BASE_URL   = "<?= $baseUrl ?>";
 
+const RNAME   = "<?= $rname ?>";
+const LPATH   = "<?= $lpath ?>";
+const IDROLE   = "<?= $idrole ?>";
+const IDUSER   = "<?= $iduser ?>";
+
 const WORK_URL   = "<?= $WORK_URL ?>";
 const VIEW_URL   = "<?= $VIEW_URL ?>";
 const VIEW_NAME  = "<?= $VIEW_NAME_NOQUERY ?>";
 
 const FILE_ID    = "pdf_<?= (int)$pdf_id ?>";
 const PDF_ID_NUM = <?= (int)$pdf_id ?>;
+
+const FILENAME = "<?= $FILENAME ?>";
 
 const IS_STAMP_VIEW = <?= ($stamp==1 ? 'true':'false') ?>;
 
@@ -193,11 +330,14 @@ function stringToColor(str) {
 }
 
 // ================ ADOBE INIT ================
+//content: { location: { url: window.location.origin + BASE_URL + VIEW_URL } },
+//http://dzaries.my.id:8000/uploads/document/5/support.pdf
+//'http://dzaries.my.id/edmg-github-clone/edmg/public/uploads/document/5/support.pdf' 
 document.addEventListener("adobe_dc_view_sdk.ready", function () {
   const adobeDCView = new AdobeDC.View({ clientId: ADOBE_KEY, divId: "adobe-dc-view" });
 
   adobeDCView.previewFile({
-    content: { location: { url: window.location.origin + BASE_URL + VIEW_URL } },
+	content: { location: { url: 'https://dzaries.my.id/edms/public/'+ WORK_URL  } },
     metaData: { fileName: VIEW_NAME, id: FILE_ID }
   }, {
     showAnnotationTools: true,
@@ -324,13 +464,17 @@ function closeStampModal(){ document.getElementById('stamp-modal').style.display
 
 async function loadStampPdf() {
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'assets/vendor/pdfjs/pdf.worker.min.js?v=1';
-  const url = window.location.origin + BASE_URL + WORK_URL;
+  //const url = window.location.origin + BASE_URL + WORK_URL;
+  //'http://dzaries.my.id/edmg-github-clone/edmg/public/uploads/document/5/support.pdf' 
+  
+  const url = 'https://dzaries.my.id/edms/public/'+ WORK_URL ;
   stampPdfDoc = await pdfjsLib.getDocument({ url }).promise;
 
   document.getElementById('stamp-page').max = stampPdfDoc.numPages;
   document.getElementById('stamp-status').innerText = `Preview OK. Total halaman: ${stampPdfDoc.numPages}`;
   await renderStampPreview();
 }
+
 
 async function renderStampPreview() {
   if (!stampPdfDoc) return;
@@ -341,14 +485,12 @@ async function renderStampPreview() {
   const page = await stampPdfDoc.getPage(stampCurrentPage);
   const wrap = document.getElementById('stamp-preview-wrap');
   const targetWidth = Math.min(760, wrap.clientWidth - 40);
-
   const viewport0 = page.getViewport({ scale: 1 });
   const scale = targetWidth / viewport0.width;
   const viewport = page.getViewport({ scale });
 
   stampCanvas.width = Math.floor(viewport.width);
   stampCanvas.height = Math.floor(viewport.height);
-
   stampCanvas.style.width = stampCanvas.width + "px";
   stampCanvas.style.height = stampCanvas.height + "px";
 
@@ -358,42 +500,53 @@ async function renderStampPreview() {
   const box = document.getElementById('stamp-box');
   const img = document.getElementById('stamp-img');
   const type = document.getElementById('stamp-type').value;
-
   img.src = `assets/stamps/${type}.png?v=${Date.now()}`;
+
   box.style.display = 'block';
 
   const defaultW = Math.max(140, Math.round(stampCanvas.width * 0.22));
-  const defaultH = Math.max(60,  Math.round(stampCanvas.height * 0.08));
+  const defaultH = Math.max(60, Math.round(stampCanvas.height * 0.08));
 
-  const left = stampCanvas.width - defaultW - 20;
-  const top  = stampCanvas.height - defaultH - 20;
+  // === POSISI AWAL PALING ATAS + DRAG AMAN ===
+  const left = stampCanvas.width - defaultW - 30;   // pojok kanan
+  const top  = 40;                                  // PALING ATAS (40px)
 
-  box.style.width  = `${defaultW}px`;
-  box.style.height = `${defaultH}px`;
+  box.style.width    = `${defaultW}px`;
+  box.style.height   = `${defaultH}px`;
+  box.style.left     = '0px';      // penting
+  box.style.top      = '0px';      // penting
   box.style.transform = `translate(${left}px, ${top}px)`;
+
   box.setAttribute('data-x', left);
   box.setAttribute('data-y', top);
 }
+
+
+document.getElementById('stamp-type').addEventListener('change', function() {
+    const type = this.value;
+    const img = document.getElementById('stamp-img');
+    if (img) {
+        img.src = `assets/stamps/${type}.png?v=${Date.now()}`;
+    }
+});
 
 function resetStampBox(){ renderStampPreview(); }
 
 function initStampInteract() {
   const box = document.getElementById('stamp-box');
-
-  interact(box).unset();
+  interact(box).unset();   // reset dulu
 
   interact(box)
     .draggable({
       inertia: false,
       listeners: {
         move (event) {
-          const target = event.target;
-          let x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
-          let y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+          let x = (parseFloat(box.getAttribute('data-x')) || 0) + event.dx;
+          let y = (parseFloat(box.getAttribute('data-y')) || 0) + event.dy;
 
-          target.style.transform = `translate(${x}px, ${y}px)`;
-          target.setAttribute('data-x', x);
-          target.setAttribute('data-y', y);
+          box.style.transform = `translate(${x}px, ${y}px)`;
+          box.setAttribute('data-x', x);
+          box.setAttribute('data-y', y);
         }
       }
     })
@@ -401,47 +554,44 @@ function initStampInteract() {
       edges: { left: false, right: true, bottom: true, top: false },
       listeners: {
         move (event) {
-          const target = event.target;
-          target.style.width  = event.rect.width + 'px';
-          target.style.height = event.rect.height + 'px';
+          box.style.width  = event.rect.width + 'px';
+          box.style.height = event.rect.height + 'px';
         }
       },
       modifiers: [ interact.modifiers.restrictSize({ min: { width: 60, height: 30 } }) ]
     });
-
-  document.getElementById('stamp-type').addEventListener('change', () => {
-    const type = document.getElementById('stamp-type').value;
-    document.getElementById('stamp-img').src = `assets/stamps/${type}.png?v=${Date.now()}`;
-  });
 }
+
 
 function getStampBoxPct() {
   const box = document.getElementById('stamp-box');
   const canvas = document.getElementById('stamp-canvas');
-
+  
   const cw = canvas.width;
   const ch = canvas.height;
-
-  const cssW = canvas.clientWidth || cw;
-  const cssH = canvas.clientHeight || ch;
-
-  const scaleX = cw / cssW;
-  const scaleY = ch / cssH;
-
+  
   const xCss = parseFloat(box.getAttribute('data-x')) || 0;
   const yCss = parseFloat(box.getAttribute('data-y')) || 0;
-
+  
   const wCss = box.offsetWidth;
   const hCss = box.offsetHeight;
+
+  const scaleX = cw / (canvas.clientWidth || cw);
+  const scaleY = ch / (canvas.clientHeight || ch);
 
   const xCanvas = xCss * scaleX;
   const yCanvas = yCss * scaleY;
   const wCanvas = wCss * scaleX;
   const hCanvas = hCss * scaleY;
 
+  // HITUNG DELTA DARI POSISI AWAL (40px)
+  const initialTop = 40;
+  const deltaY = yCanvas - initialTop;
+
   return {
     x_pct: xCanvas / cw,
     y_pct_top: yCanvas / ch,
+    delta_y: deltaY,           // ← ini yang baru & penting
     w_pct: wCanvas / cw,
     h_pct: hCanvas / ch
   };
@@ -449,14 +599,25 @@ function getStampBoxPct() {
 
 async function applyStampToPdf() {
   const status = document.getElementById('stamp-status');
-  status.innerText = 'Memproses stamp...';
+  status.innerText = 'Memproses...';
+
+  // DEBUG SUPER KUAT
+  console.log('=== APPLY DITEKAN ===');
+  alert('Apply ditekan! Cek console sekarang.');
+
+  const currentType = document.getElementById('stamp-type').value || 'approved_without_comment';
+
+  console.log('Tipe yang dipilih:', currentType);
+  console.log('Page:', stampCurrentPage);
 
   const payload = {
     pdf_id: PDF_ID_NUM,
     page: stampCurrentPage,
-    type: document.getElementById('stamp-type').value,
+    type: currentType,
     ...getStampBoxPct()
   };
+
+  console.log('Payload yang dikirim:', payload);
 
   try {
     const r = await fetch('stamp_apply.php', {
@@ -464,15 +625,37 @@ async function applyStampToPdf() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const res = await r.json();
-    if (!r.ok || res.status !== 'success') throw new Error(res.message || 'Gagal apply stamp');
 
-    status.innerText = '✅ Berhasil.';
-    window.location.href = "index.php?pdf_id=" + PDF_ID_NUM + "&stamp=1";
+    const resText = await r.text();
+    console.log('Response raw:', resText);
+
+    let res;
+    try {
+      res = JSON.parse(resText);
+    } catch(e) {
+      throw new Error('Response bukan JSON: ' + resText.substring(0, 200));
+    }
+
+    console.log('Response JSON:', res);
+
+    if (!r.ok || res.status !== 'success') {
+      throw new Error(res.message || 'Gagal apply stamp');
+    }
+
+    status.innerText = '✅ Berhasil!';
+    alert('Stamp berhasil disimpan!');
+    //window.location.reload();   // refresh halaman supaya stamp kelihatan
+    
+    window.location.href = `index.php?pdf_id=${PDF_ID_NUM}&rname=${RNAME}&idrole=${IDROLE}&iduser=${IDUSER}&stamp=1&fileName=${encodeURIComponent(FILENAME)}&lpath=${LPATH}&v=${Date.now()}`;
+
   } catch (e) {
+    console.error('ERROR:', e);
     status.innerText = '❌ Error: ' + e.message;
+    alert('ERROR: ' + e.message + '\n\nCek console F12 untuk detail');
   }
 }
+
+
 <?php endif; ?>
 </script>
 </body>

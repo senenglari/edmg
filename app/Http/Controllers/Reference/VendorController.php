@@ -14,6 +14,8 @@ use App\Model\UserManagement\MenuModel;
 use App\Model\Reference\ReferenceModel;
 use App\Model\Reference\VendorModel;
 use App\Model\Sys\LogModel;
+use App\Model\Reference\CompanyModel;   // ← TAMBAHKAN BARIS INI
+
 
 class VendorController extends Controller
 {
@@ -35,6 +37,7 @@ class VendorController extends Controller
         $this->PROT_ModuleId      = (count($rs) > 0) ? $rs[0]->id : '';
         # ---------------
         View::share(array("SHR_Parent"=>$this->PROT_Parent, "SHR_Module"=>$this->PROT_ModuleName, "SHR_ModuleId"=>$this->PROT_ModuleId));
+        $this->qCompany = new CompanyModel;   // ← TAMBAHKAN BARIS INI
     }
 
     public function index(Request $request)
@@ -167,39 +170,41 @@ class VendorController extends Controller
         }        
     }
 
+
     public function save(Request $request) {
         try {
-            $rules["name"]               = 'required|';
-            $messages["name.required"]   = 'Name is required';
-
+            $rules["name"] = 'required|';
+            $messages["name.required"] = 'Name is required';
             if(!empty($request->email_address)) {
-                $rules["email_address"]               = "required|email:rfc";
-                $messages["email_address.required"]   = 'Email is required';
+                $rules["email_address"] = "required|email:rfc";
+                $messages["email_address.required"] = 'Email is required';
             }
-
             $validator = Validator::make($request->all(), $rules, $messages);
-
             if ($validator->fails()) {
                 return redirect("/vendor/add")
                             ->withErrors($validator)
                             ->withInput();
             } else {
-                $response   = $this->qVendor->createData($request);
-
+                $response = $this->qVendor->createData($request);
+                
                 if($response["status"]) {
-                    session()->flash("success_message", "Successfully Saved");
+                    // AUTO CREATE COMPANY (cek dulu biar tidak duplikat / loop)
+                    $existingCompany = CompanyModel::where('name', $request->name)->first();
+                    if(!$existingCompany) {
+                        $this->qCompany->createData($request);
+                    }
+                    session()->flash("success_message", "Successfully Saved (Vendor & Company)");
                 } else {
                     session()->flash("error_message", "Failed to save");
                 }
             }
-            # ---------------
             return redirect("/vendor/index");
         } catch (\Exception $e) {
             $this->logModel->createError($e->getMessage(), "PAGE VENDOR", "");
-            # ---------------
             return view("error.405");
         }
     }
+
 
     public function edit($id) {
         try {
@@ -244,35 +249,61 @@ class VendorController extends Controller
 
     public function update(Request $request) {
         try {
-            $rules["name"]               = 'required|';
-            $messages["name.required"]   = 'Name is required';
-
+            $rules["name"] = 'required|';
+            $messages["name.required"] = 'Name is required';
             if(!empty($request->email_address)) {
-                $rules["email_address"]               = "required|email:rfc";
-                $messages["email_address.required"]   = 'Email is required';
+                $rules["email_address"] = "required|email:rfc";
+                $messages["email_address.required"] = 'Email is required';
             }
-
             $validator = Validator::make($request->all(), $rules, $messages);
-
             if ($validator->fails()) {
                 return redirect("/vendor/edit/" . encodedData($request->input("id")))
                             ->withErrors($validator)
                             ->withInput();
             } else {
-                $response   = $this->qVendor->updateData($request);
+                // Ambil data lama Vendor (sebelum diupdate) → biar tetap ketemu meski nama diubah
+                $oldVendor = DB::table('ref_vendor')
+                               ->where('vendor_id', $request->input('id'))
+                               ->first();
 
+                // Update Vendor dulu
+                $response = $this->qVendor->updateData($request);
+                
                 if($response["status"]) {
-                    session()->flash("success_message", "Successfully updated");
+                    // Data yang akan disinkron ke Company (hanya field yang sama)
+                    $data = [
+                        'name'          => $request->name,
+                        'address'       => $request->address ?? '',
+                        'phone_number'  => $request->phone_number ?? '',
+                        'fax_number'    => $request->fax_number ?? '',
+                        'email_address' => $request->email_address ?? '',
+                        'pic'           => $request->pic ?? '',
+                        'status'        => $request->status ?? 0,
+                    ];
+
+                    // Update Company pakai NAMA LAMA
+                    $oldName = $oldVendor ? $oldVendor->name : $request->name;
+                    $updated = DB::table('ref_company')
+                                 ->where('name', $oldName)
+                                 ->update($data);
+
+                    if ($updated > 0) {
+                        session()->flash("success_message", "Successfully updated (Vendor & Company)");
+                    } else {
+                        // Kalau belum ada Company-nya, buat baru
+                        $this->qCompany->createData($request);
+                        session()->flash("success_message", "Successfully updated + Company baru dibuat");
+                    }
                 } else {
-                    session()->flash("error_message", "Failed to updated");
+                    session()->flash("error_message", "Failed to updated Vendor");
                 }
             }
-            # ---------------
             return redirect("/vendor/index");
         } catch (\Exception $e) {
             $this->logModel->createError($e->getMessage(), "PAGE UPDATE VENDOR", "");
-            # ---------------
             return view("error.405");
         }
     }
+    
+    
 }

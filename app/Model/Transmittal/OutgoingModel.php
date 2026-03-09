@@ -28,6 +28,32 @@ class OutgoingModel extends Model
         $this->logModel     = new LogModel;   
         $this->sysModel     = new SysModel;
     }
+    
+    
+    
+    public function createAutoDraft($project_id, $vendor_id, $incoming_detail_id)
+    {
+        $outgoing_no = 'AUTO-' . date('YmdHis');
+    
+        $headerId = DB::table('outgoing_transmittal')->insertGetId([
+            'outgoing_no' => $outgoing_no,
+            'project_id' => $project_id,
+            'vendor_id' => $vendor_id,
+            'subject' => 'Document Revision Required',
+            'content' => 'Please upload revised document.',
+            'status_code' => 1,
+            'created_by' => Auth::id(),
+            'created_at' => now()
+        ]);
+    
+        DB::table('outgoing_transmittal_detail')->insert([
+            'outgoing_transmittal_id' => $headerId,
+            'incoming_transmittal_detail_id' => $incoming_detail_id,
+            'created_at' => now()
+        ]);
+    
+        return $headerId;
+    }    
 
     public function getCollections() {
         try {
@@ -354,7 +380,10 @@ class OutgoingModel extends Model
                                                                   ->join("sys_users", "comment.user_id", "sys_users.id")
                                                                   ->where("outgoing_transmittal_detail.outgoing_transmittal_id", $request->idData)
                                                                   ->first();
-                $cc_email_address   = $qCC->cc_email_address;
+                                                                  
+                   // dd($qCC);                                              
+                //$cc_email_address   = $qCC->cc_email_address;
+                $cc_email_address = optional($qCC)->cc_email_address;
             /* ----------
               Header
             ----------------------- */
@@ -388,7 +417,10 @@ class OutgoingModel extends Model
                     $data["subject"]    = $request->subject;
                     $data["content"]    = $request->content;
                     $emails             = explode(",", str_replace(" ", "", $request->email_address));
-                    $email_cc           = explode(",", str_replace(" ", "", $cc_email_address));
+                    //$email_cc           = explode(",", str_replace(" ", "", $cc_email_address));
+                    
+                    $email_cc = $cc_email_address  ? explode(",", str_replace(" ", "", $cc_email_address)) : [];
+                    
                     # ---------------
                     $data["detail"]     = DB::table("outgoing_transmittal_detail")->select("document.document_no", "document.document_title"
                                                                                             , "ref_return_status.name AS return_status_name", "ref_issue_status.name AS issue_status_name", "ref_document_status.name AS document_status_name")
@@ -447,6 +479,78 @@ class OutgoingModel extends Model
                             $message->from(env("MAIL_USERNAME"), 'Automatic Mail System');
                         });
                     }
+                    
+                    
+ 
+ 
+ $vendorId = DB::table("outgoing_transmittal")
+    ->where("outgoing_transmittal_id",$request->idData)
+    ->value("vendor_id");
+ 
+                    
+                    $incomingId = DB::table("incoming_transmittal")->insertGetId([
+                        "vendor_id" => $request->vendor_id ?? $vendorId,
+                        "incoming_no" => "AUTO-" . date("YmdHis"),
+                        "subject" => $request->subject,
+                        "created_by" => Auth::id(),
+                        "created_at" => now(),
+                        "status" => 1
+                    ]);
+
+                    
+                    $docs = DB::table("outgoing_transmittal_detail")
+                        ->join(
+                            "incoming_transmittal_detail",
+                            "outgoing_transmittal_detail.incoming_transmittal_detail_id",
+                            "=",
+                            "incoming_transmittal_detail.incoming_transmittal_detail_id"
+                        )
+                        ->select("incoming_transmittal_detail.document_id")
+                        ->where("outgoing_transmittal_detail.outgoing_transmittal_id",$request->idData)
+                        ->get();
+                        
+   
+   
+   
+                             $vendorOutgoingId = DB::table("outgoing_transmittal")->insertGetId([
+                                "vendor_id" => $request->vendor_id,
+                                "outgoing_no" => "REV-" . date("YmdHis"),
+                                "subject" => "UPLOAD REVISION - ".$request->subject,
+                                "content" => "Please upload revised document",
+                                "status_email" => 1, // draft
+                                "created_by" => Auth::id(),
+                                "created_at" => now()
+                            ]);
+                              
+   
+                        
+                        
+                        foreach($docs as $doc){
+                            
+                            
+                            // $incomingDetailId = DB::table("incoming_transmittal_detail")->insertGetId([
+                            // "incoming_transmittal_id"=>$incomingId,
+                            // "document_id"=>$doc->document_id
+                            // ]);
+                            
+                            // DB::table("outgoing_transmittal_detail")->insert([
+                            // "outgoing_transmittal_id"=>$vendorOutgoingId,
+                            // "incoming_transmittal_detail_id"=>$incomingDetailId
+                            // ]);
+                            
+                                DB::table("incoming_transmittal_detail")->insert([
+                                    "incoming_transmittal_id"=>$incomingId,
+                                    "document_id"=>$doc->document_id,
+                                    "issue_status_incoming_id"=>2,
+                                    "issue_status_id"=>2
+                                ]);
+        
+
+                        
+                        }        
+                        
+                        
+                    
                 }
             /* ----------
              Logs

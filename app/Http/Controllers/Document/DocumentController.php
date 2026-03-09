@@ -53,6 +53,417 @@ class DocumentController extends Controller
         View::share(array("SHR_Parent" => $this->PROT_Parent, "SHR_Module" => $this->PROT_ModuleName, "SHR_ModuleId" => $this->PROT_ModuleId));
     }
 
+
+public function exportDetail($id_enc)
+{
+    //dd(decodedData($id_enc));die;
+
+    try {
+
+        $id = decodedData($id_enc);
+        if (empty($id) || !is_numeric($id)) {
+            throw new \Exception("Invalid document ID");
+        }
+
+        $id = (int)$id;
+
+        $document   = $this->qDocument->getDataDocExistingById($id);
+        $historyDoc = $this->qDocument->getDataHistoryDocument($id);
+        $comment    = $this->qDocument->getDataHistoryComment($id);
+       
+       $historyDoc = $historyDoc->toArray();
+       $comment = $comment->toArray();
+ 
+      
+      
+      
+      
+        if (!$document) {
+            throw new \Exception("Document not found");
+        }
+
+        //$historyDoc = is_array($historyDoc) ? $historyDoc[0] : [];
+        //$comment    = is_array($comment) ? $comment : [];
+
+
+        $objPHPExcel = new PHPExcel();
+        $sheet = $objPHPExcel->getActiveSheet();
+        $sheet->setTitle('Document Detail');
+
+        // HEADER
+        $sheet->setCellValue('A1', 'Document Detail for '.$document->document_no);
+        $sheet->mergeCells('A1:F1');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+
+        $sheet->setCellValue('A3', 'Project');
+        $sheet->setCellValue('B3', $document->project_name ?? '');
+
+        $sheet->setCellValue('A4', 'Vendor');
+        $sheet->setCellValue('B4', $document->vendor_name ?? '');
+
+        $sheet->setCellValue('A5', 'Document Number');
+        $sheet->setCellValue('B5', $document->document_no ?? '');
+
+        $sheet->setCellValue('A6', 'Title');
+        $sheet->setCellValue('B6', $document->document_title ?? '');
+
+        $sheet->getStyle('A3:A6')->getFont()->setBold(true);
+
+        $row = 8;
+
+        // DOCUMENT HISTORY
+        $sheet->setCellValue('A'.$row, 'Document History');
+        $sheet->getStyle('A'.$row)->getFont()->setBold(true);
+        $row++;
+
+        $sheet->setCellValue('A'.$row, 'Transmittal Number');
+        $sheet->setCellValue('B'.$row, 'Sender Date');
+        $sheet->setCellValue('C'.$row, 'Receive Date');
+        $sheet->setCellValue('D'.$row, 'File Name');
+        $sheet->setCellValue('E'.$row, 'Issue Status');
+        $sheet->setCellValue('F'.$row, 'Status Incoming');
+
+        $sheet->getStyle('A'.$row.':F'.$row)->getFont()->setBold(true);
+        $row++;
+
+        
+        foreach ($historyDoc as $k=>$item) {
+            $item->document_file="'".$item->document_file;
+            
+             $sheet->setCellValue('A'.$row, isset($item->incoming_no) ? $item->incoming_no : '');
+             $sheet->setCellValue('B'.$row, isset($item->sender_date) ? $item->sender_date : '');
+            $sheet->setCellValue('C'.$row, isset($item->receive_date) ? $item->receive_date : '');
+            $sheet->setCellValue('D'.$row, isset($item->document_file) ? $item->document_file : '');
+            $sheet->setCellValue('E'.$row, isset($item->issue_status) ? $item->issue_status : '');
+            $sheet->setCellValue('F'.$row,isset($item->status_incoming) ? $item->status_incoming : '');
+        }
+
+/*
+        foreach ($historyDoc as $k=>$item) {
+             $sheet->setCellValue('A'.$row, $item->incoming_no ?? '');
+             $sheet->setCellValue('B'.$row, $item->sender_date ?? '');
+            $sheet->setCellValue('C'.$row, $item->receive_date ?? '');
+            $sheet->setCellValue('D'.$row, $item->document_file ?? '');
+            $sheet->setCellValue('E'.$row, $item->issue_status ?? '');
+            $sheet->setCellValue('F'.$row, $item->status_incoming ?? '');
+            $row++;
+        }
+*/
+        $row += 2;
+
+        // COMMENT HISTORY
+        $sheet->setCellValue('A'.$row, 'Comment History');
+        $sheet->getStyle('A'.$row)->getFont()->setBold(true);
+        $row++;
+
+        $sheet->setCellValue('A'.$row, 'Name');
+        $sheet->setCellValue('B'.$row, 'Role');
+        $sheet->setCellValue('C'.$row, 'Remark');
+        $sheet->setCellValue('D'.$row, 'Status');
+        $sheet->setCellValue('E'.$row, 'Date');
+        $sheet->getStyle('A'.$row.':E'.$row)->getFont()->setBold(true);
+        $row++;
+
+        foreach ($comment as $item) {
+            $sheet->setCellValue('A'.$row, $item->comment_user ?? '');
+            $sheet->setCellValue('B'.$row, $item->role ?? '');
+            $sheet->setCellValue('C'.$row, $item->remark ?? '');
+            $sheet->setCellValue('D'.$row, $item->status ?? '');
+            $sheet->setCellValue('E'.$row, $item->created_at ?? '');
+            $row++;
+        }
+
+        foreach (range('A', 'F') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        if (ob_get_length()) {
+            ob_end_clean();
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="document_detail.xlsx"');
+        header('Cache-Control: max-age=0');
+
+        $writer = PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel2007');
+        $writer->save('php://output');
+        exit;
+
+    } catch (\Throwable $e) {
+        return redirect()->back()->with('error_message', 'Gagal export: '.$e->getMessage());
+    }
+}
+
+
+public function exportMultiplexxx(Request $request)
+{
+    try {
+        $from_date = $request->input('from_date');
+        $to_date = $request->input('to_date');
+
+        if (empty($from_date) || empty($to_date)) {
+            return redirect()->back()->with('error_message', 'Please select date range');
+        }
+
+        // Ambil list dokumen by date range dari model (tambah fungsi ini di model, lihat langkah 4)
+        $documents = $this->qDocument->getDocumentsByDateRange($from_date, $to_date);
+
+        if (count($documents) == 0) {
+            return redirect()->back()->with('error_message', 'No documents found in the date range');
+        }
+
+        $objPHPExcel = new PHPExcel();
+        $sheet = $objPHPExcel->getActiveSheet();
+        $sheet->setTitle('Multiple Documents');
+
+        $row = 1; // Mulai dari atas
+
+        foreach ($documents as $doc) {
+            // Section per dokumen
+            $sheet->setCellValue('A' . $row, 'Document: ' . $doc->document_no);
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true)->setSize(14);
+            $row += 2;
+
+            // Document Info
+            $sheet->setCellValue('A' . $row, 'Project'); $sheet->setCellValue('B' . $row, $doc->project_name ?? '');
+            $sheet->setCellValue('A' . ($row+1), 'Vendor'); $sheet->setCellValue('B' . ($row+1), $doc->vendor_name ?? '');
+            $sheet->setCellValue('A' . ($row+2), 'Document Number'); $sheet->setCellValue('B' . ($row+2), $doc->document_no ?? '');
+            $sheet->setCellValue('A' . ($row+3), 'Title'); $sheet->setCellValue('B' . ($row+3), $doc->title ?? '');
+            $sheet->getStyle('A' . $row . ':A' . ($row+3))->getFont()->setBold(true);
+            $row += 5;
+
+            // History
+            $history = $this->qDocument->getDataHistoryDocument($doc->document_id);
+            $sheet->setCellValue('A' . $row, 'Document History');
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true);
+            $row++;
+            $sheet->setCellValue('A' . $row, 'Transmittal Number');
+            $sheet->setCellValue('B' . $row, 'Sender Date');
+            $sheet->setCellValue('C' . $row, 'Receive Date');
+            $sheet->setCellValue('D' . $row, 'File Name');
+            $sheet->setCellValue('E' . $row, 'Issue Status');
+            $sheet->setCellValue('F' . $row, 'Status Incoming');
+            $sheet->getStyle('A' . $row . ':F' . $row)->getFont()->setBold(true);
+            $row++;
+            if (count($history) > 0) {
+                foreach ($history as $item) {
+                    $sheet->setCellValue('A' . $row, $item->incoming_no ?? '');
+                    $sheet->setCellValue('B' . $row, displayDMY($item->sender_date ?? ''));
+                    $sheet->setCellValue('C' . $row, displayDMY($item->receive_date ?? ''));
+                    $sheet->setCellValue('D' . $row, $item->document_file ?? '');
+                    $sheet->setCellValue('E' . $row, $item->issue_status ?? '');
+                    $sheet->setCellValue('F' . $row, $item->status_incoming ?? '');
+                    $row++;
+                }
+            } else {
+                $sheet->setCellValue('A' . $row, 'No history');
+                $row++;
+            }
+            $row += 2;
+
+            // Comment
+            $comments = $this->qDocument->getDataHistoryComment($doc->document_id);
+            $sheet->setCellValue('A' . $row, 'Comment History');
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true);
+            $row++;
+            $sheet->setCellValue('A' . $row, 'Name');
+            $sheet->setCellValue('B' . $row, 'Role');
+            $sheet->setCellValue('C' . $row, 'Remark');
+            $sheet->setCellValue('D' . $row, 'Status');
+            $sheet->setCellValue('E' . $row, 'Date');
+            $sheet->getStyle('A' . $row . ':E' . $row)->getFont()->setBold(true);
+            $row++;
+            if (count($comments) > 0) {
+                foreach ($comments as $item) {
+                    $sheet->setCellValue('A' . $row, $item->comment_user ?? '');
+                    $sheet->setCellValue('B' . $row, $item->role ?? '');
+                    $sheet->setCellValue('C' . $row, $item->remark ?? '');
+                    $sheet->setCellValue('D' . $row, $item->status ?? '');
+                    $sheet->setCellValue('E' . $row, displayDMY($item->created_at ?? ''));
+                    $row++;
+                }
+            } else {
+                $sheet->setCellValue('A' . $row, 'No comments');
+                $row++;
+            }
+            $row += 3; // Jarak antar dokumen
+        }
+
+        // Auto size
+        foreach (range('A', 'F') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        // Download
+        if (ob_get_length()) {
+            ob_end_clean();
+        }
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="multiple_documents_' . date('Y-m-d') . '.xlsx"');
+        header('Cache-Control: max-age=0');
+        $writer = PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel2007');
+        $writer->save('php://output');
+        exit;
+
+    } catch (\Exception $e) {
+        return redirect()->back()->with('error_message', 'Gagal export: ' . $e->getMessage());
+    }
+}
+
+
+public function exportMultiple(Request $request)
+{
+    try {
+
+        $from_date = $request->input('from_date');
+        $to_date   = $request->input('to_date');
+
+        if (empty($from_date) || empty($to_date)) {
+            return redirect()->back()->with('error_message', 'Please select date range');
+        }
+
+        $documents = $this->qDocument->getDocumentsByDateRange($from_date, $to_date);
+
+        if (empty($documents) || count($documents) == 0) {
+            return redirect()->back()->with('error_message', 'No documents found in the date range');
+        }
+
+        $objPHPExcel = new PHPExcel();
+        $sheet = $objPHPExcel->getActiveSheet();
+        $sheet->setTitle('Multiple Documents');
+
+        $row = 1;
+
+        foreach ($documents as $doc) {
+
+            if (!$doc) continue;
+
+            // ================= HEADER =================
+            $sheet->setCellValue('A'.$row, 'Document: '. $doc->document_no);
+            $sheet->getStyle('A'.$row)->getFont()->setBold(true)->setSize(14);
+            $row += 2;
+
+            // ================= DOCUMENT INFO =================
+            $sheet->setCellValue('A'.$row, 'Project');
+            $sheet->setCellValue('B'.$row, isset($doc->project_name) ? $doc->project_name : '');
+
+            $sheet->setCellValue('A'.($row+1), 'Vendor');
+            $sheet->setCellValue('B'.($row+1), isset($doc->vendor_name) ? $doc->vendor_name : '');
+
+            $sheet->setCellValue('A'.($row+2), 'Document Number');
+            $sheet->setCellValue('B'.($row+2), isset($doc->document_no) ? $doc->document_no : '');
+
+            $sheet->setCellValue('A'.($row+3), 'Title');
+            $sheet->setCellValue('B'.($row+3), isset($doc->document_title) ? $doc->document_title : '');
+
+            $sheet->getStyle('A'.$row.':A'.($row+3))->getFont()->setBold(true);
+
+            $row += 5;
+
+            // ================= HISTORY =================
+            $history = $this->qDocument->getDataHistoryDocument($doc->document_id);
+
+            $sheet->setCellValue('A'.$row, 'Document History');
+            $sheet->getStyle('A'.$row)->getFont()->setBold(true);
+            $row++;
+
+            $sheet->setCellValue('A'.$row, 'Transmittal Number');
+            $sheet->setCellValue('B'.$row, 'Sender Date');
+            $sheet->setCellValue('C'.$row, 'Receive Date');
+            $sheet->setCellValue('D'.$row, 'File Name');
+            $sheet->setCellValue('E'.$row, 'Issue Status');
+            $sheet->setCellValue('F'.$row, 'Status Incoming');
+
+            $sheet->getStyle('A'.$row.':F'.$row)->getFont()->setBold(true);
+            $row++;
+
+            if (!empty($history) && count($history) > 0) {
+
+                foreach ($history as $item) {
+
+                    if (!$item) continue;
+
+                    $sheet->setCellValue('A'.$row, isset($item->incoming_no) ? $item->incoming_no : '');
+                    $sheet->setCellValue('B'.$row, isset($item->sender_date) ? displayDMY($item->sender_date) : '');
+                    $sheet->setCellValue('C'.$row, isset($item->receive_date) ? displayDMY($item->receive_date) : '');
+
+                    // Hindari error kalau diawali "="
+                    $fileName = isset($item->document_file) ? $item->document_file : '';
+                    $sheet->setCellValue('D'.$row, "'" . $fileName);
+
+                    $sheet->setCellValue('E'.$row, isset($item->issue_status) ? $item->issue_status : '');
+                    $sheet->setCellValue('F'.$row, isset($item->status_incoming) ? $item->status_incoming : '');
+
+                    $row++;
+                }
+
+            } else {
+                $sheet->setCellValue('A'.$row, 'No history');
+                $row++;
+            }
+
+            $row += 2;
+
+            // ================= COMMENT =================
+            $comments = $this->qDocument->getDataHistoryComment($doc->document_id);
+
+            $sheet->setCellValue('A'.$row, 'Comment History');
+            $sheet->getStyle('A'.$row)->getFont()->setBold(true);
+            $row++;
+
+            $sheet->setCellValue('A'.$row, 'Name');
+            $sheet->setCellValue('B'.$row, 'Role');
+            $sheet->setCellValue('C'.$row, 'Remark');
+            $sheet->setCellValue('D'.$row, 'Status');
+            $sheet->setCellValue('E'.$row, 'Date');
+
+            $sheet->getStyle('A'.$row.':E'.$row)->getFont()->setBold(true);
+            $row++;
+
+            if (!empty($comments) && count($comments) > 0) {
+
+                foreach ($comments as $item) {
+
+                    if (!$item) continue;
+
+                    $sheet->setCellValue('A'.$row, isset($item->comment_user) ? $item->comment_user : '');
+                    $sheet->setCellValue('B'.$row, isset($item->role) ? $item->role : '');
+                    $sheet->setCellValue('C'.$row, isset($item->remark) ? $item->remark : '');
+                    $sheet->setCellValue('D'.$row, isset($item->status) ? $item->status : '');
+                    $sheet->setCellValue('E'.$row, isset($item->created_at) ? displayDMY($item->created_at) : '');
+
+                    $row++;
+                }
+
+            } else {
+                $sheet->setCellValue('A'.$row, 'No comments');
+                $row++;
+            }
+
+            $row += 3;
+        }
+
+        foreach (range('A', 'F') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        if (ob_get_length()) {
+            ob_end_clean();
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="multiple_documents_' . date('Y-m-d') . '.xlsx"');
+        header('Cache-Control: max-age=0');
+
+        $writer = PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel2007');
+        $writer->save('php://output');
+        exit;
+
+    } catch (\Exception $e) {
+        return redirect()->back()->with('error_message', 'Gagal export: '.$e->getMessage());
+    }
+}
+
     // public function index(Request $request) {
     //     try {
     //         /* ----------
@@ -698,6 +1109,25 @@ class DocumentController extends Controller
             return view("error.405");
         }
     }
+    
+    
+  // app/Http/Controllers/Document/DocumentController.php
+public function assignment_ic($id_enc)
+{
+    $id     = decodedData($id_enc);
+    $data   = $this->mDocument->getDataById($id);
+
+    // >>> TIDAK ADA guard status==6 di sini <<<
+
+    // lanjutkan isi persis seperti method assignment() lama:
+    // $selectUser = $this->->getSelectUser() ...
+    // $selectRole = $this->->getSelectRoleAssignment() ...
+    // return view('document.assignment', [...]);
+}
+  
+    
+    
+    
     public function assignment($id_enc)
     {
         try {
@@ -715,11 +1145,18 @@ class DocumentController extends Controller
 
             $qData                 =  $this->qDocument->getDataById($id);
 
-            if ($qData->status == 6) {
-                session()->flash("error_message", "The document can't be assigned");
-                # ---------------
-                return redirect("/document/index");
-            }
+            // if ($qData->status == 6) {
+            //     session()->flash("error_message", "The document can't be assigned");
+            //     # ---------------
+            //     return redirect("/document/index");
+            // }
+            
+            
+if ($qData->status == 6 && request('src') !== 'ic') {
+    session()->flash('error_message', 'The document can’t be assigned');
+    return redirect('/document/index');
+}
+
             // Empty table comment temp
             $this->qDocument->emptyTempByClone();
             // Clone to comment temp
@@ -842,6 +1279,7 @@ class DocumentController extends Controller
         }
     }
 
+
     public function detail($id_enc)
     {
         try {
@@ -868,6 +1306,12 @@ class DocumentController extends Controller
             return view("error.405");
         }
     }
+    
+
+
+
+
+
 
     public function change_approval($id_enc)
     {
@@ -1485,7 +1929,7 @@ class DocumentController extends Controller
                 ->setCellValue("D1", "REF_NUMBER")
                 ->setCellValue("E1", "REVIEWER")
                 ->setCellValue("F1", "APPROVER")
-                ->setCellValue("G1", "OBSERVER")
+                ->setCellValue("G1", "RESPONSIBILITY")
                 ;
 
             # -------------------
@@ -1513,7 +1957,7 @@ class DocumentController extends Controller
                     ->setCellValue("D" . $Row, $row->ref_no)
                     ->setCellValue("E" . $Row, $row->reviewer)
                     ->setCellValue("F" . $Row, $row->approver)
-                    ->setCellValue("G" . $Row, $row->observer);
+                    ->setCellValue("G" . $Row, $row->responsibility);
 
                 $End = $Row;
                 $Row++;

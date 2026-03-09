@@ -3,7 +3,7 @@
         @csrf
     <div class="container-fluid">
         <div class="navbar-header">
-            <a href="{{ url('/') }}" class="navbar-brand"><img src="{{ asset('app/img/icon/hanochem.png') }}" style="width: 40px;" /></a>
+            <a href="{{ url('/') }}" class="navbar-brand"><img  src="{{ asset('app/img/icon/hanochem.png') }}" style="width: 120px;" /></a>
             <button type="button" class="navbar-toggle" data-click="sidebar-toggled">
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>

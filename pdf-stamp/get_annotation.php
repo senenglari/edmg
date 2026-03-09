@@ -1,15 +1,16 @@
 <?php
+include 'db.php';
 header('Content-Type: application/json');
 // Mencegah caching agar data selalu terbaru
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
-$host = "localhost";
-$user = "dzariesm_sandi";
-$pass = "@Pass123!@#";
-$db   = "dzariesm_db";
+// $host = "localhost";
+// $user = "root";
+// $pass = "";
+// $db   = "dzariesm_db";
 
-$conn = new mysqli($host, $user, $pass, $db);
+// $conn = new mysqli($host, $user, $pass, $db);
 
 if ($conn->connect_error) {
     die(json_encode(["error" => "Koneksi database gagal: " . $conn->connect_error]));

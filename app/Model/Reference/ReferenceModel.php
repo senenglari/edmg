@@ -26,6 +26,19 @@ class ReferenceModel extends Model
         return $query;
     }
 
+
+public function getMaxNumericRevision($document_id)
+{
+    $maxRev = DB::table('incoming_transmittal_detail as itd')
+        ->join('ref_document_status as rds', 'itd.document_status_id', '=', 'rds.document_status_id')
+        ->where('itd.document_id', $document_id)
+        ->whereRaw("rds.name REGEXP '^[0-9]+$'") // hanya yang pure angka (0,1,2,...)
+        ->max(DB::raw("CAST(rds.name AS UNSIGNED)"));
+
+    return $maxRev ?? -1; // -1 kalau belum ada revision sama sekali
+}
+
+
     public function getSelectDepartment()
     {
         $query = DB::select("SELECT department_id AS id, name as name FROM ref_department where status = 1 ORDER BY name ASC");
@@ -61,14 +74,14 @@ class ReferenceModel extends Model
     }
     public function getSelectIssueStatusIFI()
     {
-        $query = DB::select("SELECT issue_status_id AS id, name FROM ref_issue_status where status = 1 AND issue_status_id = " . STATUS_ONLY_IFI . " ORDER BY name ASC");
-
+        $query = DB::select("SELECT issue_status_id AS id, name FROM ref_issue_status where status = 1 AND issue_status_id = 13 ORDER BY name ASC");
+    
         return $query;
     }
     public function getSelectIssueStatusIDC()
     {
-        $query = DB::select("SELECT issue_status_id AS id, name FROM ref_issue_status where issue_status_id = " . STATUS_ONLY_IDC . " ORDER BY name ASC");
-
+        $query = DB::select("SELECT issue_status_id AS id, name FROM ref_issue_status where issue_status_id = 1 ORDER BY name ASC");
+    
         return $query;
     }
     public function getSelectReturnStatus()
@@ -79,14 +92,35 @@ class ReferenceModel extends Model
     }
     public function getSelectDocumentStatus()
     {
-        $query = DB::select("SELECT document_status_id AS id, name FROM ref_document_status where status = 1 ORDER BY name ASC");
-
+        $query = DB::select("
+            SELECT document_status_id AS id, name 
+            FROM ref_document_status 
+            WHERE status = 1 
+            ORDER BY CAST(name AS UNSIGNED) ASC
+        ");
+    
         return $query;
     }
+    
+    public function getSelectDocumentStatusInternal()
+    {
+        $query = DB::select("
+            SELECT document_status_id AS id, name
+            FROM ref_document_status
+            WHERE name REGEXP '^[0-9]+$'
+            AND status = 1
+            ORDER BY CAST(name AS UNSIGNED)
+        ");
+    
+        return $query;
+    }    
+    
+    
+    
     public function getSelectIssueStatusIFIContruction()
     {
-        $query = DB::select("SELECT issue_status_id AS id, name FROM ref_issue_status where status = 1 AND issue_status_id = " . STATUS_ONLY_IFI_CONSTRUCTION . " ORDER BY name ASC");
-
+        $query = DB::select("SELECT issue_status_id AS id, name FROM ref_issue_status where status = 1 AND issue_status_id = 18 ORDER BY name ASC");
+    
         return $query;
     }
 

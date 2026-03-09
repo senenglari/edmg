@@ -13,6 +13,7 @@ use App\User;
 use App\Model\UserManagement\MenuModel;
 use App\Model\Reference\CompanyModel;
 use App\Model\Sys\LogModel;
+use App\Model\Reference\VendorModel;
 
 class CompanyController extends Controller
 {
@@ -20,17 +21,18 @@ class CompanyController extends Controller
 
     public function __construct(Request $request) {
         # ---------------
-        $uri                      = getUrl() . "/index";
+        $uri = getUrl() . "/index";
         # ---------------
-        $this->qMenu              = new MenuModel;
-        $this->qCompany           = new CompanyModel;
-        $this->logModel           = new LogModel;
+        $this->qMenu = new MenuModel;
+        $this->qCompany = new CompanyModel;
+        $this->logModel = new LogModel;
+        $this->qVendor  = new VendorModel;        // ← BARU
         # ---------------
-        $rs                       = $this->qMenu->getParentMenu($uri);
+        $rs = $this->qMenu->getParentMenu($uri);
         # ---------------
-        $this->PROT_Parent        = (count($rs) > 0) ? $rs[0]->parent_name : '';
-        $this->PROT_ModuleName    = (count($rs) > 0) ? $rs[0]->name : '';
-        $this->PROT_ModuleId      = (count($rs) > 0) ? $rs[0]->id : '';
+        $this->PROT_Parent = (count($rs) > 0) ? $rs[0]->parent_name : '';
+        $this->PROT_ModuleName = (count($rs) > 0) ? $rs[0]->name : '';
+        $this->PROT_ModuleId = (count($rs) > 0) ? $rs[0]->id : '';
         # ---------------
         View::share(array("SHR_Parent"=>$this->PROT_Parent, "SHR_Module"=>$this->PROT_ModuleName, "SHR_ModuleId"=>$this->PROT_ModuleId));
     }
@@ -166,25 +168,25 @@ class CompanyController extends Controller
 
     public function save(Request $request) {
         try {
-            $rules["name"]               = 'required|';
-            $messages["name.required"]   = 'Name is required';
-
+            $rules["name"] = 'required|';
+            $messages["name.required"] = 'Name is required';
             if(!empty($request->email_address)) {
-                $rules["email_address"]               = "required|email:rfc";
-                $messages["email_address.required"]   = 'Email is required';
+                $rules["email_address"] = "required|email:rfc";
+                $messages["email_address.required"] = 'Email is required';
             }
-
             $validator = Validator::make($request->all(), $rules, $messages);
-
             if ($validator->fails()) {
                 return redirect("/company/add")
                             ->withErrors($validator)
                             ->withInput();
             } else {
-                $response   = $this->qCompany->createData($request);
-
+                $response = $this->qCompany->createData($request);
+                
                 if($response["status"]) {
-                    session()->flash("success_message", "Successfully Saved");
+                    // === AUTO CREATE VENDOR DENGAN DATA SAMA ===
+                    $this->qVendor->createData($request);
+                    
+                    session()->flash("success_message", "Successfully Saved (Company & Vendor)");
                 } else {
                     session()->flash("error_message", "Failed to save");
                 }
@@ -193,11 +195,9 @@ class CompanyController extends Controller
             return redirect("/company/index");
         } catch (\Exception $e) {
             $this->logModel->createError($e->getMessage(), "PAGE COMPANY", "");
-            # ---------------
             return view("error.405");
         }
     }
-
     public function edit($id) {
         try {
             $data["title"]        = "Edit Company";
@@ -238,27 +238,35 @@ class CompanyController extends Controller
         }
     }
 
+
     public function update(Request $request) {
         try {
-            $rules["name"]               = 'required|';
-            $messages["name.required"]   = 'Name is required';
-
+            $rules["name"] = 'required|';
+            $messages["name.required"] = 'Name is required';
             if(!empty($request->email_address)) {
-                $rules["email_address"]               = "required|email:rfc";
-                $messages["email_address.required"]   = 'Email is required';
+                $rules["email_address"] = "required|email:rfc";
+                $messages["email_address.required"] = 'Email is required';
             }
-
             $validator = Validator::make($request->all(), $rules, $messages);
-
             if ($validator->fails()) {
                 return redirect("/company/edit/" . encodedData($request->input("id")))
                             ->withErrors($validator)
                             ->withInput();
             } else {
-                $response   = $this->qCompany->updateData($request);
-
+                $response = $this->qCompany->updateData($request);
+                
                 if($response["status"]) {
-                    session()->flash("success_message", "Successfully updated");
+                    // === AUTO UPDATE VENDOR (pakai name sebagai kunci) ===
+                    // Karena di form edit, name readonly
+                    $vendorResponse = $this->qVendor->updateData($request);
+                    
+                    if($vendorResponse["status"]) {
+                        session()->flash("success_message", "Successfully updated (Company & Vendor)");
+                    } else {
+                        // Kalau Vendor belum ada, buat baru
+                        $this->qVendor->createData($request);
+                        session()->flash("success_message", "Successfully updated (Company & Vendor created)");
+                    }
                 } else {
                     session()->flash("error_message", "Failed to updated");
                 }
@@ -267,8 +275,9 @@ class CompanyController extends Controller
             return redirect("/company/index");
         } catch (\Exception $e) {
             $this->logModel->createError($e->getMessage(), "PAGE UPDATE COMPANY", "");
-            # ---------------
             return view("error.405");
         }
     }
+
+
 }

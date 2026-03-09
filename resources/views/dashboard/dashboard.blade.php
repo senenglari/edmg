@@ -14,7 +14,7 @@
     </ol>
     <h1 class="page-header">{{ $title }}<small></small></h1>
     <div class="row" style="margin-top: 30px;">
-        <div class="col-md-3 col-sm-6">
+        <!--div class="col-md-3 col-sm-6">
             <div class="widget widget-stats" style="background-color: #FFCC00; color: black;">
                 <div class="stats-icon stats-icon-lg"><i class="fa fa-tags fa-fw"></i></div>
                 <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">IFR</div>
@@ -24,12 +24,15 @@
                 </div>
                 <div class="stats-desc" style="color: black;">Issue for Review</div>
             </div>
-        </div>
+        </div-->
         <div class="col-md-3 col-sm-6">
             <div class="widget widget-stats" style="background-color: #FF9900; color: black;">
                 <div class="stats-icon stats-icon-lg"><i class="fa fa-check-square fa-fw"></i></div>
                 <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">IFA</div>
-                <div class="stats-number">{{ number_format($summary["data"]->ifa_status, 0) }} document(s)</div>
+                <div class="stats-number">
+                    {{ number_format($summary["data"]->ifa_status, 0) }} document(s)  <br>
+                0 overdue
+                </div>
                 <div class="stats-progress progress">
                     <div class="progress-bar" style="width: 100%;"></div>
                 </div>
@@ -39,23 +42,27 @@
         <div class="col-md-3 col-sm-6">
             <div class="widget widget-stats bg-blue" style="color: black;">
                 <div class="stats-icon stats-icon-lg"><i class="fa fa-legal fa-fw"></i></div>
-                <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">IFU</div>
-                <div class="stats-number">{{ number_format($summary["data"]->afd_status, 0) }} document(s)</div>
+                <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">IFR</div>
+                <div class="stats-number">{{ number_format($summary["data"]->afd_status, 0) }} document(s)<br>
+                0 overdue
+                </div>
                 <div class="stats-progress progress">
                     <div class="progress-bar" style="width: 100%;"></div>
                 </div>
-                <div class="stats-desc" style="color: black;">Issued for Use</div>
+                <div class="stats-desc" style="color: black;">Issue for Review</div>
             </div>
         </div>
         <div class="col-md-3 col-sm-6">
             <div class="widget widget-stats bg-green" style="color: black;">
                 <div class="stats-icon stats-icon-lg"><i class="fa fa-gear (alias) fa-fw"></i></div>
-                <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">AFC</div>
-                <div class="stats-number">{{ number_format($summary["data"]->afc_status, 0) }} document(s)</div>
+                <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">IFI</div>
+                <div class="stats-number">{{ number_format($summary["data"]->afc_status, 0) }} document(s)<br>
+                0 overdue
+                </div>
                 <div class="stats-progress progress">
                     <div class="progress-bar" style="width: 100%;"></div>
                 </div>
-                <div class="stats-desc" style="color: black;">Approved for Construction</div>
+                <div class="stats-desc" style="color: black;">Issue for Info</div>
             </div>
         </div>
    </div>
@@ -107,13 +114,13 @@
                                                 <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;">a</span>
                                             @else
                                                 @if($sts[$i-1] == 1)
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-warning btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @endif
                                                 @else
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-success btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
@@ -192,13 +199,13 @@
                                                 <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                             @else
                                                 @if($sts[$i-1] == 1) 
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-warning btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @endif
                                                 @else
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-success btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
@@ -275,13 +282,13 @@
                                                 <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                             @else
                                                 @if($sts[$i-1] == 1) 
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-warning btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @endif
                                                 @else
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-success btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
@@ -359,13 +366,13 @@
                                                 <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                             @else
                                                 @if($sts[$i-1] == 1) 
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-warning btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @endif
                                                 @else
-                                                    @if($roles[$i-1] == "OBSERVER")
+                                                    @if($roles[$i-1] == "RESPONSIBILITY")
                                                     <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
                                                     @else
                                                     <span class="btn btn-success btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>

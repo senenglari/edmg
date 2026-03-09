@@ -140,6 +140,26 @@ class DocumentModel extends Model
             return array("status" => false, "data" => []);
         }
     }
+    
+    
+    
+    
+public function getDocumentsByDateRange($from_date, $to_date)
+{
+return DB::table('document as a')
+    ->select(
+        'a.document_id',
+        'a.document_no',
+        'a.document_title',
+        'b.project_name',
+        'c.name as vendor_name'
+    )
+    ->join('project as b', 'a.project_id', '=', 'b.project_id')
+    ->join('ref_vendor as c', 'a.vendor_id', '=', 'c.vendor_id')
+    ->whereBetween('a.created_at', [$from_date, $to_date])
+    ->orderBy('a.created_at', 'DESC')
+    ->get();
+}    
 
     public function getIFICollections()
     {
@@ -310,6 +330,11 @@ class DocumentModel extends Model
         try {
             $user_id    = Auth::user()->id;
             # ------------------------
+            
+            $projectEndDate = DB::table('project')
+            ->where('project_id', $request->project_id)
+            ->value('end_date'); // DATE: YYYY-MM-DD
+            
 
             $docId         = DB::table("document")
                 ->insertGetId([
@@ -325,6 +350,7 @@ class DocumentModel extends Model
                     "pic_id" => $request->pic,
                     "department_id" => $request->departemen_id,
                     "incoming_transmittal_detail_id" => 0,
+                    "deadline" => $projectEndDate,
                     "created_by" => Auth::user()->id,
                     "created_at" => Carbon::now()->toDateTimeString(),
                     "approved_by" => $request->approval_by
@@ -1156,7 +1182,7 @@ class DocumentModel extends Model
                                     "incoming_transmittal_detail_id" => 0,
                                     "reviewer" => $row['reviewer'],
                                     "approver" => $row['approver'],
-                                    "observer" => $row['observer'],
+                                    "responsibility" => $row['responsibility'],
                                     "note" => $note,
                                     "status" => $status,
                                     "is_idc" => $request->is_document_idc,
@@ -1294,7 +1320,7 @@ class DocumentModel extends Model
                         ]);
 
                     // $docId = 1;
-                    $this->createAssignment($docId, $row->reviewer, $row->approver, $row->observer);
+                    $this->createAssignment($docId, $row->reviewer, $row->approver, $row->responsibility);
                 } else {
                     // UPDATE DOCUMENT
                     $qDoc = $this->getDocumentByNomor($row->document_no);
@@ -1316,7 +1342,7 @@ class DocumentModel extends Model
                     ]);
 
                     // Update Assignment
-                    $this->UpdateAssignment($qDoc->document_id, $row->reviewer, $row->approver, $row->observer);
+                    $this->UpdateAssignment($qDoc->document_id, $row->reviewer, $row->approver, $row->responsibility);
                 }
                 
             }
@@ -1344,7 +1370,7 @@ class DocumentModel extends Model
         }
     }
 
-    public function createAssignment($idDoc, $reviewer, $approver, $observer )
+    public function createAssignment($idDoc, $reviewer, $approver, $responsibility )
     {
         if ($approver != null) {
             $assignmentId         = DB::table("assignment")
@@ -1387,8 +1413,8 @@ class DocumentModel extends Model
                 }
             }
 
-            if ($observer != null) {
-                $arrayob = explode(",", $observer);
+            if ($responsibility != null) {
+                $arrayob = explode(",", $responsibility);
                 foreach ($arrayob as $index => $val) {
                     $no = ++$index;
                     # ------------------------
@@ -1396,7 +1422,7 @@ class DocumentModel extends Model
                         ->insert([
                             "assignment_id" => $assignmentId,
                             "user_id" => $val,
-                            "role" => 'OBSERVER',
+                            "role" => 'RESPONSIBILITY',
                             "status" => 0, // NEW
                             "order_no" => $no
                         ]);
@@ -1450,7 +1476,7 @@ class DocumentModel extends Model
         return $query;
     }
 
-    public function UpdateAssignment($idDoc, $reviewer, $approver, $observer)
+    public function UpdateAssignment($idDoc, $reviewer, $approver, $responsibility)
     {
         if ($approver != null) {
             $qDocument = $this->getDataById($idDoc);
@@ -1500,8 +1526,8 @@ class DocumentModel extends Model
                     }
                 }
 
-                if ($observer != null) {
-                    $array = explode(",", $observer);
+                if ($responsibility != null) {
+                    $array = explode(",", $responsibility);
                     foreach ($array as $index => $row) {
                         $no = ++$index;
                         # ------------------------
@@ -1509,7 +1535,7 @@ class DocumentModel extends Model
                             ->insert([
                                 "assignment_id" => $assignmentId,
                                 "user_id" => $row,
-                                "role" => 'OBSERVER',
+                                "role" => 'RESPONSIBILITY',
                                 "status" => 0, // NEW
                                 "order_no" => $no
                             ]);
@@ -1597,16 +1623,16 @@ class DocumentModel extends Model
                 }
 
                 DB::table('comment')
-                ->where('role',  'OBSERVER')
+                ->where('role',  'RESPONSIBILITY')
                 ->where('assignment_id',  $qAssigment->assignment_id)
                 ->delete();
 
-                if ($observer != null) {
-                    $array = explode(",", $observer);
+                if ($responsibility != null) {
+                    $array = explode(",", $responsibility);
                     foreach ($array as $index => $row) {
                         
                         $no = ++$index;
-                        $role = "OBSERVER";
+                        $role = "RESPONSIBILITY";
                         # ------------------------
                         DB::table("comment")
                         ->insert([

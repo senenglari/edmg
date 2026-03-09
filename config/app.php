@@ -167,7 +167,7 @@ return [
         // Excel
         Maatwebsite\Excel\ExcelServiceProvider::class,
 		
-		Barryvdh\DomPDF\ServiceProvider::class,
+		//Barryvdh\DomPDF\ServiceProvider::class,
         Yajra\Datatables\DatatablesServiceProvider::class,
 
         Tymon\JWTAuth\Providers\LaravelServiceProvider::class,

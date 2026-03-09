@@ -1,6 +1,23 @@
 @extends('main')
 @section('content')
 <div id="content" class="content">
+    
+    
+                        <div class="form-group" style="margin-bottom: 20px;">
+    <form method="POST" action="{{ url('/document/export-multiple') }}" id="exportForm"  target="_blank">
+        @csrf
+        <label for="from_date">From Date:</label>
+        <input type="date" name="from_date" id="from_date" class="form-control d-inline-block" style="width: 150px;">
+        <label for="to_date">To Date:</label>
+        <input type="date" name="to_date" id="to_date" class="form-control d-inline-block" style="width: 150px;">
+        <button type="submit" class="btn btn-sm btn-success">
+            <i class="fa fa-file-excel-o m-r-2"></i> Export by Date
+        </button>
+    </form>
+</div>
+         
+    
+    
     <form id="myform" name="myform" action="{{ URL::to('/').$form_act }}" method="post" autocomplete="off">
         @csrf
         <ol class="breadcrumb pull-right">
@@ -24,6 +41,10 @@
                             @endif
                         </h4>
                     </div>
+                    
+                    
+           
+                    
                     <div class="alert alert-danger" id="alert-box" style="{{ (Session::has("error_message")) ? "" : "display:none;" }}">
                         <i class="fa fa-times-circle fa-fw"></i> <span id="alert-message">{{ (Session::has("error_message")) ? Session::get("error_message") : "" }}</span>
                     </div>
@@ -109,6 +130,8 @@
                                         @php ($field = $row["name"]) @endphp
 
                                         <td style="width:{{ $row["width"] }}; text-align:{{ $row["item-align"] }};">
+                                        
+                                            
                                             @if ($row["item-format"] == "number")
                                             {{ number_format($rs->$field, 0) }}
                                             @elseif ($row["item-format"] == "flag")
@@ -118,27 +141,56 @@
                                             @elseif ($row["item-format"] == "checkbox")
                                             @elseif ($row["item-format"] == "progress")
                                                 @for ($i=1; $i<=$rs->unit; $i++)
-                                                    @php
-                                                    $user = explode(",", $rs->list_name);
-                                                    $sts  = explode(",", $rs->list_status);
-                                                    $roles= explode(",", $rs->list_role);
 
-                                                    $usr  = (!empty($user[$i-1])) ? $user[$i-1] : "";
-                                                    @endphp
+    @php
+        $user  = explode(",", $rs->list_name);
+        $sts   = explode(",", $rs->list_status);
+        $roles = explode(",", $rs->list_role);
 
-                                                    @if($rs->status == 1)
-                                                        <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
-                                                    @else
-                                                        @if($roles[$i-1] == 'OBSERVER')
-                                                            <span class="btn btn-default btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
-                                                        @elseif($sts[$i-1] == 1) 
-                                                            <span class="btn btn-warning btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
-                                                        @else
-                                                            <span class="btn btn-success btn-icon btn-xs" data-toggle="tooltip" data-placement="top" title="{{ $usr }}" style="width: 12px; height: 12px;"></span>
-                                                        @endif
-                                                    @endif
-                                                    
-                                                @endfor
+        $usr = (!empty($user[$i-1])) ? $user[$i-1] : "";
+
+        // 🔥 CAST & TRIM BIAR AMAN
+        $statusValue = isset($sts[$i-1]) ? (int) trim($sts[$i-1]) : 0;
+    @endphp
+
+    {{-- DEBUG SEMENTARA --}}
+    {{-- {{ $roles[$i-1] ?? '' }} : {{ $statusValue }} --}}
+
+    @if($rs->status == 1)
+
+        <span class="btn btn-default btn-icon btn-xs"
+              data-toggle="tooltip"
+              title="{{ $usr }}"
+              style="width:12px;height:12px;"></span>
+
+    @else
+
+        @if($statusValue == 1)
+
+            <span class="btn btn-warning btn-icon btn-xs"
+                  data-toggle="tooltip"
+                  title="{{ $usr }}"
+                  style="width:12px;height:12px;"></span>
+
+        @elseif($statusValue == 2)
+
+            <span class="btn btn-success btn-icon btn-xs"
+                  data-toggle="tooltip"
+                  title="{{ $usr }}"
+                  style="width:12px;height:12px;"></span>
+
+        @else
+
+            <span class="btn btn-default btn-icon btn-xs"
+                  data-toggle="tooltip"
+                  title="{{ $usr }}"
+                  style="width:12px;height:12px;"></span>
+
+        @endif
+
+    @endif
+
+@endfor
                                             @else
                                                 {{ $rs->$field }}
                                             @endif

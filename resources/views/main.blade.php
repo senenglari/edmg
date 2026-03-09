@@ -11,7 +11,7 @@
     <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
     <meta content="" name="description"/>
     <meta content="" name="author"/>
-    <link rel="icon" type="image/ico" href="{{ asset('app/img/icon/faviconn.ico') }}"/>
+    <link rel="icon" type="image/ico" href="{{ asset('app/img/icon/favicone.ico') }}"/>
     <link href="{{ asset('app/css/fonts.googleapis.css') }}" rel="stylesheet">
     <!-- ================== BEGIN BASE CSS STYLE ================== -->
     <link href="{{ asset('vendor/color_admin/plugins/jquery-ui/themes/base/minified/jquery-ui.min.css') }}"

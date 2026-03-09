@@ -106,7 +106,7 @@ class DashboardModel extends Model
             "document.document_no",
             "document.document_title",
             DB::Raw("DATE_FORMAT(document.deadline, '%d/%m/%Y') AS deadline"),
-            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'OBSERVER' THEN 'O' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
+            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'RESPONSIBILITY' THEN 'O' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
             DB::Raw("GROUP_CONCAT(sys_users.full_name ORDER BY comment.order_no) AS list_name"),
             DB::Raw("(CASE document.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code")
         )
@@ -176,7 +176,7 @@ class DashboardModel extends Model
             "document.document_no",
             "document.document_title",
             DB::Raw("DATE_FORMAT(document.deadline, '%d/%m/%Y') AS deadline"),
-            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'OBSERVER' THEN 'X' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
+            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'RESPONSIBILITY' THEN 'X' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
             DB::Raw("GROUP_CONCAT(sys_users.full_name ORDER BY comment.order_no) AS list_name"),
             DB::Raw("(CASE document.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code")
         )
@@ -245,7 +245,7 @@ class DashboardModel extends Model
             "document.document_no",
             "document.document_title",
             DB::Raw("DATE_FORMAT(document.deadline, '%d/%m/%Y') AS deadline"),
-            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'OBSERVER' THEN 'X' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
+            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'RESPONSIBILITY' THEN 'X' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
             DB::Raw("GROUP_CONCAT(sys_users.full_name ORDER BY comment.order_no) AS list_name"),
             DB::Raw("(CASE document.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code")
         )
@@ -313,7 +313,7 @@ class DashboardModel extends Model
             "document.document_no",
             "document.document_title",
             DB::Raw("DATE_FORMAT(document.deadline, '%d/%m/%Y') AS deadline"),
-            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'OBSERVER' THEN 'X' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
+            DB::Raw("GROUP_CONCAT(CASE comment.status WHEN 1 AND comment.role = 'RESPONSIBILITY' THEN 'X' WHEN 1 AND comment.role = 'REVIEWER' THEN '-' WHEN 2 THEN 'V' END ORDER BY comment.order_no SEPARATOR '|') AS Progress"),
             DB::Raw("GROUP_CONCAT(sys_users.full_name ORDER BY comment.order_no) AS list_name"),
             DB::Raw("(CASE document.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code")
         )

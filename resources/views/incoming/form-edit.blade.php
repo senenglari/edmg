@@ -27,7 +27,7 @@
                 <div class="alert alert-danger" id="alert-box" style="{{ (Session::has("error_message")) ? "" : "display:none;" }}">
                     <i class="fa fa-times-circle fa-fw"></i> <span id="alert-message">{{ (Session::has("error_message")) ? Session::get("error_message") : "" }}</span>
                 </div>
-                <div class="panel-body">
+                <div class="panel-body">{{  $form_act }}
                     <form class="form-horizontal" id="myform" name="myform" action="{{ URL::to('/').$form_act }}" method="post" enctype="multipart/form-data">
                         @csrf
                         @foreach ($fields as $row)

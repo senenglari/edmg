@@ -16,6 +16,18 @@
                     </div>
                     <h4 class="panel-title">{{ $title }}</h4>
                 </div>
+                
+                
+
+                
+<div class="form-group" style="text-align: right; margin-bottom: 20px;">
+    <a href="{{ url('/document/export-detail/' . request()->segment(3)) }}" 
+       class="btn btn-sm btn-success">
+        <i class="fa fa-file-excel-o m-r-2"></i> Export All to Excel
+    </a>
+</div>
+                
+                
                 @if ($errors->any())
                 <div class="alert alert-danger" id="alert-box">
                     @foreach ($errors->all() as $error)
@@ -52,7 +64,46 @@
                                             </a>
                                         @endif
                                     </div>
+
+									<!--cari di incoming transmital detail -->
+									<!--http://dzaries.my.id/edmg-github-clone/edmg/pdf-stamp/index.php?pdf_id=5&stamp=1&fileName=support.pdf-->
+								{{-- Buka PDF dengan PDF Stamp - FIX Undefined offset: 2 --}}
+@php
+    // Amankan dulu document_url (sesuai request kamu)
+    $document_url = $document->document_url ?? '';
+
+    if (!$document_url || trim($document_url) === '' || trim($document_url) === '/') {
+        $document_url = "///";   // trik kamu biar explode selalu punya index 2
+    }
+
+    $parts = explode('/', $document_url);
+
+    // Ambil pdf_id dengan aman (tidak akan error lagi)
+    $pdf_id = $parts[2] ?? '';
+
+    $laspath = explode('/', request()->path());  // ini kalau masih dipakai
+@endphp
+
+<div class="mt-4">
+    @if ($pdf_id !== '')
+        <a href="http://dzaries.my.id/edms/pdf-stamp/index.php?pdf_id={{ $parts[2] }}&rname={{ auth()->user()->name }}&lpath={{ $laspath[2] }}&idrole={{ auth()->user()->position_id }}&iduser={{ auth()->user()->id }}&fileName={{ $document->document_file }}" 
+										   target="_blank" 
+										   class="btn btn-primary btn-lg">
+            <i class="fas fa-file-pdf me-2"></i> Buka PDF
+        </a>
+    @else
+        <button class="btn btn-secondary btn-lg" disabled>
+            <i class="fas fa-file-pdf me-2"></i> File PDF Tidak Tersedia
+        </button>
+    @endif
+</div>
+									
                                 </div>
+								
+								
+								
+								
+								
                                 <!-- end profile-left -->
                                 <!-- begin profile-right -->
                                 <div class="profile-right">

@@ -164,6 +164,24 @@ class CommentsController extends Controller
             return view("error.405");
         }
     }
+    
+    public function forceCloseReviewer($assignment_id)
+{
+
+    DB::table("comment")
+        ->where("assignment_id",$assignment_id)
+        ->where("role","REVIEWER")
+        ->where("status",1)
+        ->update([
+            "status"=>2,
+            "return_status_id"=>AWTC_STATUS_ID,
+            "remark"=>"Auto Closed (AWTC)",
+            "updated_at"=>now()
+        ]);
+
+    return redirect()->back()->with("success","Reviewer closed. Approver can continue.");
+}
+
 
     public function unfilter()
     {
@@ -195,22 +213,48 @@ class CommentsController extends Controller
             $selectReturnStatus    = $this->qReference->getSelectReturnStatus();
             $qUserComment          = $this->qComments->getCommentDetailUser($data["header"]->assignment_id, Auth::user()->id);            
             
-            if($data["header"]->issue_dokumen == 3 || $data["header"]->issue_dokumen == 8) {
-                $qIssueStatus          = $this->qReference->getSelectIssueStatusComments(STATUS_APPROVAL_IFA);
-            } else if($data["header"]->issue_dokumen == 4 || $data["header"]->issue_dokumen == 9 || $data["header"]->issue_dokumen == 12 || $data["header"]->issue_dokumen == 16) {
-                $qIssueStatus          = $this->qReference->getSelectIssueStatusComments(STATUS_APPROVAL_AFC_IFU);
-            } else if($data["header"]->issue_dokumen == 13 || $data["header"]->issue_dokumen == 14) {
-                $qIssueStatus          = $this->qReference->getSelectIssueStatusComments(STATUS_APPROVAL_IFI);
-            } else if($data["header"]->issue_dokumen == 10 || $data["header"]->issue_dokumen == 15) {
-                $qIssueStatus          = $this->qReference->getSelectIssueStatusComments(STATUS_APPROVAL_IFC);
-            } else {
-                $qIssueStatus          = $this->qReference->getSelectIssueStatusComments(STATUS_APPROVAL_IDC);
+            $currentStatus = $data["header"]->issue_status_id;
+
+            if($currentStatus == STATUS_IFC || $currentStatus == STATUS_RE_IFC){
+                $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFC);
+            
+            }else if($currentStatus == STATUS_IFA || $currentStatus == STATUS_RE_IFA){
+                $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFA);
+            
+            }else if($currentStatus == STATUS_IFR || $currentStatus == STATUS_RE_IFR){
+                $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFR);
+            
+            }else if($currentStatus == STATUS_IFI || $currentStatus == STATUS_RE_IFI){
+                $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFI);
+            
+            }else{
+                $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFC);
             }
             // $stsApproval           = ($qDataComment->order_no == $data["header"]->order_no) ? "APPROVAL" : "-";
             $stsApproval           = ($qUserComment->role == 'APPROVER') ? "APPROVER" : "-";
             # ---------------
             $file                  = (!empty($data["header"]->document_file)) ? asset("/uploads") . $data["header"]->document_url . $data["header"]->document_file : "";
             $file_crs              = (!empty($data["header"]->document_crs)) ? asset("/uploads") . $data["header"]->document_url . $data["header"]->document_crs : "";
+            
+            
+            $laspath  = explode('/', request()->path()); 
+            $idrole=auth()->user()->position_id;
+            $rname=auth()->user()->name;
+            $iduser=auth()->user()->id;
+            $document_id=$data['header']->document_id;
+            $fileName=$data['header']->document_file;
+            $dokurl=$data['header']->document_url;
+            $deturl=explode("/",$dokurl);
+            $pdf_id=$deturl[2];
+            $lpath=$laspath[2];
+
+            
+            $file= "http://dzaries.my.id/edms/pdf-stamp/index.php?comment=1&pdf_id=".$pdf_id."&rname=".$rname."&idrole=".$idrole."&iduser=".$iduser."&fileName=".$fileName."&lpath=".$lpath;
+                       
+            
+            
+            
+            
             /* ----------
              Fields
             ----------------------- */

@@ -6,6 +6,21 @@ header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
 
+
+/*
+Array
+(
+    [user_id] => 1
+    [user_name] => admin
+    [role] => admin
+    [pdf_id] => 18
+    [fname] => TMBP-SP001-ME-DST-D115 MECHANICAL DATASHEET FOR TEST PUMP KRG (P-003 AB)_REV A (IFR)_20260119231547.pdf
+    [lpath] => TFU5aGZuTldKa1FlS0Vnb2FTb0tiUzhoR1V0aWVYUkhjUQ==
+    [idrole] => 49
+    [iduser] => 3
+)
+
+*/
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
     echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);
@@ -14,14 +29,25 @@ if (!isset($_SESSION['user_id'])) {
 
 $userId = (int)$_SESSION['user_id'];
 
+
 // ===== CEK HAK STAMP =====
-$qUser = $conn->query("SELECT can_stamp, role FROM users WHERE id = '$userId' LIMIT 1");
-$user = $qUser ? $qUser->fetch_assoc() : null;
+// $qUser = $conn->query("SELECT can_stamp, role FROM users WHERE id = '$userId' LIMIT 1");
+// $user = $qUser ? $qUser->fetch_assoc() : null;
 
 $canStamp = false;
-if ($user) {
-    $canStamp = ($user['role'] === 'admin') || ((int)$user['can_stamp'] === 1);
+// if ($user) {
+//     $canStamp = ($user['role'] === 'admin') || ((int)$user['can_stamp'] === 1);
+// }
+
+if($_SESSION['idrole']== 49){
+    
+    
+    $canStamp=1;
 }
+$pdf_id=$_SESSION['pdf_id'];
+
+//echo $pdf_id;
+//echo $canStamp.'---';
 if (!$canStamp) {
     http_response_code(403);
     echo json_encode(['status' => 'error', 'message' => 'Tidak punya akses stamp']);
@@ -31,7 +57,7 @@ if (!$canStamp) {
 // ===== INPUT JSON =====
 $input = json_decode(file_get_contents("php://input"), true);
 
-$pdf_id     = (int)($input['pdf_id'] ?? 0);
+//$pdf_id     = (int)($input['pdf_id'] ?? 0);
 $pageNo     = (int)($input['page'] ?? 1);
 $type       = preg_replace('/[^a-z0-9_]/i', '', (string)($input['type'] ?? ''));
 
@@ -42,7 +68,7 @@ $h_pct      = (float)($input['h_pct'] ?? 0);
 
 if ($pdf_id <= 0 || $pageNo <= 0 || $type === '') {
     http_response_code(400);
-    echo json_encode(['status' => 'error', 'message' => 'Parameter tidak valid']);
+    echo json_encode(['status' => 'error', 'message' => 'Parameter tidak valida']);
     exit;
 }
 
@@ -64,7 +90,7 @@ if (!$pdfData) {
 $fileName  = $pdfData['file_name'];
 
 // ===== INPUT: FILE KERJA (TETAP) =====
-$inputPath = "storage/$pdf_id/$fileName";
+$inputPath = "../public/uploads/document/$pdf_id/$fileName";
 if (!file_exists($inputPath)) {
     http_response_code(404);
     echo json_encode(['status' => 'error', 'message' => 'File PDF kerja tidak ditemukan']);
@@ -80,6 +106,7 @@ if (!file_exists($stampPath)) {
 }
 
 // ===== FOLDER APPROVE =====
+/*
 $approveDir = "storage/$pdf_id/approve";
 if (!is_dir($approveDir)) {
     if (!mkdir($approveDir, 0755, true)) {
@@ -91,6 +118,53 @@ if (!is_dir($approveDir)) {
 
 // ===== OUTPUT FIXED NAME (REPLACE) =====
 $approvedPath = $approveDir . "/APPROVED_" . $fileName;
+*/
+
+
+
+
+// public path (karena pdf-stamp sejajar dengan public)
+$publicDir = realpath(__DIR__ . "/../public");
+if (!$publicDir) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Public dir tidak ditemukan']);
+    exit;
+}
+
+// ===== FOLDER APPROVE (di public/uploads/...) =====
+$approveRelDir = "uploads/document/$pdf_id/approve";
+$approveDir    = $publicDir . "/" . $approveRelDir;
+
+if (!is_dir($approveDir)) {
+    if (!mkdir($approveDir, 0755, true)) {
+        http_response_code(500);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Gagal membuat folder approve',
+            'approveDir' => $approveDir,
+            'err' => error_get_last()
+        ]);
+        exit;
+    }
+}
+
+if (!is_writable($approveDir)) {
+    http_response_code(500);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Folder approve tidak writable',
+        'approveDir' => $approveDir
+    ]);
+    exit;
+}
+
+// ===== OUTPUT FIXED NAME (REPLACE) =====
+$approvedFile = "APPROVED_" . $fileName;
+$approvedPath = $approveDir . "/" . $approvedFile;
+
+// URL yang bisa dibuka browser
+$approvedUrl  = "/" . $approveRelDir . "/" . $approvedFile;
+
 
 // ===== LOAD FPDI =====
 require __DIR__ . "/vendor/autoload.php";
@@ -110,28 +184,49 @@ try {
 
         $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
         $pdf->useTemplate($tplId);
+            /*
+            if ($i === $pageNo) {
+                $pageW = (float)$size['width'];
+                $pageH = (float)$size['height'];
 
-        if ($i === $pageNo) {
-            $pageW = (float)$size['width'];
-            $pageH = (float)$size['height'];
+                $w = max(25, $w_pct * $pageW);
+                $h = max(18, $h_pct * $pageH);
 
-            // % -> unit PDF
-            $w = max(10, $w_pct * $pageW);
-            $h = max(10, $h_pct * $pageH);
-            $x = $x_pct * $pageW;
+                $x = $x_pct * $pageW;
 
-            // y_pct_top = jarak dari atas (top-origin), FPDI origin = bawah
-            $y_from_top = $y_pct_top * $pageH;
+                // POSISI VERTIKAL SESUAI DRAG (paling mendekati)
+                $y_from_top = $y_pct_top * $pageH;
+
+                // FPDI origin dari bawah, jadi:
+                $y = $pageH - $y_from_top - $h;
+
+                // Clamp
+                $x = max(15, min($x, $pageW - $w - 15));
+                $y = max(15, min($y, $pageH - $h - 15));
+
+                $pdf->Image($stampPath, $x, $y, $w, $h);
+            }
+            */
             
-            // FPDI/FPDF origin kiri-atas, jadi Y cukup dari atas
-            $y = $pageH - $y_from_top - 160;
+            if ($i === $pageNo) {
+                $pageW = (float)$size['width'];
+                $pageH = (float)$size['height'];
 
-            // clamp
-            $x = max(0, min($x, $pageW - $w));
-            $y = max(0, min($y, $pageH - $h));
+                $w = $w_pct * $pageW;
+                $h = $h_pct * $pageH;
 
-            $pdf->Image($stampPath, $x, $y, $w, $h);
-        }
+                $x = $x_pct * $pageW;
+
+                // Cara paling presisi (mengikuti drag kamu)
+                $y = $y_pct_top * $pageH;
+
+                // Clamp aman
+                $x = max(15, min($x, $pageW - $w - 15));
+                $y = max(15, min($y, $pageH - $h - 15));
+
+                $pdf->Image($stampPath, $x, $y, $w, $h);
+            }
+
     }
 
     // ===== OUTPUT TMP lalu replace APPROVE =====
@@ -156,7 +251,7 @@ try {
 
     echo json_encode([
         'status' => 'success',
-        'approved_url' => $approvedPath,
+        'approved_url' => $approvedUrl,
         'v' => @filemtime($approvedPath)
     ]);
     exit;

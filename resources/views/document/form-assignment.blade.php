@@ -57,12 +57,13 @@
                                         <th width="20%" style="text-align: center;">Department</th>
                                         <th width="15%" style="text-align: center;">Discipline</th>
                                         <th width="15%" style="text-align: center;">Position</th>
+                                        <th width="15%" style="text-align: center;">Role</th>
 										@if($showDeadline)
 										  <th>Start Date</th>
 										  <th>End Date</th>
 										@endif
-                                        <th width="15%" style="text-align: center;">Role</th>
-                                        <th width="10%" style="text-align: center;">Order</th>
+                                        
+                                        <!--th width="10%" style="text-align: center;">Order</th-->
                                         <th width="5%" style="text-align: center;"><img src="{{ asset('app/img/icon/delete.png') }}" height="16"></th>
                                     </tr>
                                 </thead>
@@ -104,7 +105,7 @@
 										  <td>{{ !empty($row->start_date) ? displayDMY($row->start_date) : '' }}</td>
 										  <td>{{ !empty($row->end_date) ? displayDMY($row->end_date) : '' }}</td>
 										@endif
-                                        <td style="text-align: center; {{ $background }}">
+                                        <!--td style="text-align: center; {{ $background }}">
                                             @if ($row->status != 2)
                                             <select id="orderNo" name="orderNo[]" class="form-control form-control-sm text-center">
                                                 <option selected value="0">-Select-</option>
@@ -115,7 +116,8 @@
                                             @else
                                             {{ $row->order_no }}
                                             @endif
-                                        </td>
+                                        </td-->
+                                        <input type=hidden name="orderNo[]" value="{{  $row->order_no  }}">
                                         <td style="text-align: center; {{ $background }};" title="">
                                             @if ($row->status != 2)
                                                 <a onClick="deleteThis({{ $row->comment_temp_id }})"><img src="{{ asset('app/img/icon/delete.png') }}" height="16" class="delete-item" title="Delete" style="cursor: pointer"></a>
@@ -493,7 +495,7 @@
 
                             var rev = (element.role == 'REVIEWER') ? 'selected' : '';
                             var app = (element.role == 'APPROVER') ? 'selected' : '';
-                            var obs = (element.role == 'OBSERVER') ? 'selected' : '';
+                            var obs = (element.role == 'RESPONSIBILITY') ? 'selected' : '';
 
 
                             var no1 = (element.order_no == 1) ? 'selected' : '';
@@ -515,7 +517,7 @@
                             var selectRole = '<input type="hidden" class="form-control" id="comment_temp_id" name="comment_temp_id[]" value="' + element.comment_temp_id + '"><select id="role" name="role[]" class="form-control form-control-sm text-center">' +
                                 '<option  value="REVIEWER"' + rev + '>REVIEWER</option>' +
                                 '<option  value="APPROVER"' + app + '>APPROVER</option>' +
-                                '<option  value="OBSERVER"' + obs + '>OBSERVER</option>' +
+                                '<option  value="RESPONSIBILITY"' + obs + '>RESPONSIBILITY</option>' +
                                 '</select>';
 
                             var selectOrder = '<select id="orderNo" name="orderNo[]" class="form-control form-control-sm text-center">' +

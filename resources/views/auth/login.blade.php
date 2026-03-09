@@ -42,7 +42,7 @@
             <div class="right-content">
                 <div class="login-header">
                     <div class="brand">
-                        <img src="{{ asset('app/img/icon/hanochem.png') }}" style="width: 100px;" />
+                        <img src="{{ asset('app/img/icon/hanochem.png') }}" style="width: 150px;" />
                     </div>
                 </div>
                 <div class="login-content">

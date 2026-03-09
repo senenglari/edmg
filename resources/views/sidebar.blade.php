@@ -53,6 +53,32 @@
                     $No = $No + 1
                 @endphp
             @endforeach
+            
+    
+    
+
+            {{-- TUTUP submenu kalau masih terbuka dari loop di atas --}}
+            @if ($Flag == "T")
+                </ul></li>
+                @php ($Flag = "F")
+            @endif
+
+            {{-- === MENU BARU: Transmittal – Incoming Company === --}}
+            <li class="{{ request()->is('incoming_company/*') ? 'active' : '' }}">
+                <a href="{{ url('incoming_company/index') }}">
+                    <i class="fa fa-building"></i>
+                    <span>Transmittal – Incoming Company</span>
+                </a>
+            </li>
+            
+            
+<li>
+<a href="{{ url('comment_company/list') }}">
+<i class="fa fa-comments"></i>
+<span>Comment Company</span>
+</a>
+</li>
+            
             </ul>
             <li><a href="javascript:void(0)" class="sidebar-minify-btn" data-click="sidebar-minify"><i class="fa fa-angle-double-left"></i></a></li>
         </ul>

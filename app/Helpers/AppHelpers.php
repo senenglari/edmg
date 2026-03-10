@@ -16,6 +16,42 @@ if (!function_exists("getLabelFlag")) {
 				$flag 	= "<span class=\"label \" style='background-color: #11CE44'>Waiting for return</span>";
 				break;
 
+			case "DONE-EXTERNAL PROGRESS":
+				$flag 	= "<span class=\"label label-info\">Done-External Progress</span>";
+				break;
+
+			case "PENDING IDC":
+				$flag 	= "<span class=\"label label-warning\">Pending IDC</span>";
+				break;
+
+			case "RESPONSIBLE COMPLETED":
+				$flag 	= "<span class=\"label label-info\">Responsible Completed</span>";
+				break;
+
+			case "OWNER APPROVED":
+				$flag 	= "<span class=\"label label-primary\">Owner Approved</span>";
+				break;
+
+			case "IDC APPROVED":
+				$flag 	= "<span class=\"label label-success\">IDC Approved</span>";
+				break;
+
+			case "RETURN TO INTERNAL":
+				$flag 	= "<span class=\"label label-danger\">Return to Internal</span>";
+				break;
+
+			case "COMPLETED":
+				$flag 	= "<span class=\"label \" style='background-color: #006400; color: white;'>Completed</span>";
+				break;
+
+			case "DONE":
+				$flag 	= "<span class=\"label \" style='background-color: #006400; color: white;'>DONE</span>";
+				break;
+
+			case "DONE":
+				$flag 	= "<span class=\"label label-warning\">On Progress</span>";
+				break;
+
 			case "SENT":
 				$flag 	= "<span class=\"label label-primary\">Sent</span>";
 				break;
@@ -101,7 +137,7 @@ if (!function_exists("getLabelFlag")) {
 				break;
 
 			case "DONE":
-				$flag 	= "<span class=\"label \" style='background-color: #11CE44'>DONE</span>";
+				$flag 	= "<span class=\"label \" style='background-color: #006400; color: white;'>DONE</span>";
 				break;
 
 			case "NONE":

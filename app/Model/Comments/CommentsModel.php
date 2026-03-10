@@ -38,6 +38,8 @@ public function getCollections()
             "$this->table.status",
             "y.document_no",
             "y.document_title",
+            "y.issue_status_id",
+            "y.note_backdoor",
             "a.name as document_type_name",
             "b.name as vendor_name",
             "c.name as area_name",
@@ -359,104 +361,43 @@ public function saveComments($request)
                CHECK REVISION FLOW
             =============================== */
 
-            if (
-                $request->issue_status_id == STATUS_RE_IFC ||
-                $request->issue_status_id == STATUS_RE_IFA
-            ) {
+            // Update document status sesuai pilihan user
+            DB::table("document")
+                ->where("document_id", $request->document_id)
+                ->update([
+                    "issue_status_id" => $request->issue_status_id,
+                    // Status dokumen tetap, tidak diubah ke 2/3/6 secara paksa
+                ]);
 
-                /* ---------- UPDATE DOCUMENT ---------- */
-
-                DB::table("document")
-                    ->where("document_id", $request->document_id)
-                    ->update([
-                        "issue_status_id" => $request->issue_status_id,
-                        "status" => 2
-                    ]);
-
-
-                /* =====================================
-                   AUTO CREATE OUTGOING TRANSMITTAL
-                ===================================== */
-
-$doc = DB::table("document")
-    ->where("document_id", $request->document_id)
-    ->first();
-
-if ($doc) {
-
-    $transmittalId = DB::table("outgoing_transmittal")->insertGetId([
-
-        "outgoing_no" => "AUTO-REV-" . date("YmdHis"),
-        "sender_date" => NULL,
-
-        "vendor_id" => $doc->vendor_id,
-        "project_id" => $doc->project_id,
-
-        "email_address" => "",
-        "cc_email_address" => "",
-
-        "subject" => "REVISION REQUIRED - " . $doc->document_no,
-        "content" => "Please upload revised document",
-
-        "status_email" => 0,
-
-        "created_by" => Auth::id(),
-        "created_at" => now()
-    ]);
-
-// dd($transmittalId);
-
-
-    // "return_status_id" => 0,
-    // "issue_status_id" => 0,
-    // "document_status_id" => 0,
-
-DB::table("outgoing_transmittal_detail")->insert([
-    "outgoing_transmittal_id" => $transmittalId,
-    "incoming_transmittal_detail_id" => $request->incoming_transmittal_detail_id,
-
-
-    "return_status_id"   => RETURN_COMMENT,      // 3
-    "issue_status_id"    => $request->issue_status_id,  // RE-IFC = 2
-    "document_status_id" => $request->document_status_id,
-
-    "document_url" => null,
-    "document_file" => null,
-    "document_file_2" => null,
-    "document_crs" => null
-]);
-
-}
-
-
-            } else {
-
-                /* ===============================
-                   APPROVE FLOW (EXTERNAL)
-                =============================== */
-
-                $approveStatus = getNextStatusApprove($request->issue_status_id);
-
-                if ($approveStatus == STATUS_DONE) {
-
-                    DB::table("document")
-                        ->where("document_id", $request->document_id)
-                        ->update([
-                            "issue_status_id" => $approveStatus,
-                            "status" => 6
-                        ]);
-
-                } else {
-
-                    DB::table("document")
-                        ->where("document_id", $request->document_id)
-                        ->update([
-                            "issue_status_id" => $approveStatus,
-                            "status" => 3
-                        ]);
-
-                }
-
+            // Jika perlu create outgoing transmittal, tetap gunakan status yang dipilih user
+            $doc = DB::table("document")
+                ->where("document_id", $request->document_id)
+                ->first();
+            if ($doc && ($request->return_status_id == RETURN_COMMENT || $request->return_status_id == RETURN_REJECT)) {
+                $transmittalId = DB::table("outgoing_transmittal")->insertGetId([
+                    "outgoing_no" => "AUTO-REV-" . date("YmdHis"),
+                    "sender_date" => NULL,
+                    "vendor_id" => $doc->vendor_id,
+                    "project_id" => $doc->project_id,
+                    "email_address" => "",
+                    "cc_email_address" => "",
+                    "subject" => "REVISION REQUIRED - " . $doc->document_no,
+                    "content" => "Please upload revised document",
+                    "status_email" => 0,
+                    "created_by" => Auth::id(),
+                    "created_at" => now()
+                ]);
+                DB::table("outgoing_transmittal_detail")->insert([
+                    "outgoing_transmittal_id" => $transmittalId,
+                    "incoming_transmittal_detail_id" => $request->incoming_transmittal_detail_id,
+                    "return_status_id"   => $request->return_status_id,
+                    "issue_status_id"    => $request->issue_status_id,
+                    "document_status_id" => $request->document_status_id,
+                    "document_url" => null,
+                    "document_file" => null,
+                    "document_file_2" => null,
+                    "document_crs" => null
+                ]);
             }
 
         } else {

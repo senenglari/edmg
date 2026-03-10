@@ -61,6 +61,14 @@ class IdcController extends Controller
             $data["filtered_info"]  = array();
             # ---------------
             $data["action"]         = $this->qMenu->getActionMenu(Auth::user()->id, $this->PROT_ModuleId);
+            // add explicit IDC button that behaves like internal transmittal (incoming/add_idc)
+            $extra = new \stdClass();
+            $extra->id   = 0;
+            $extra->name = 'IDC';
+            $extra->url  = '/incoming/add_idc';
+            // use direct link with plus icon
+            $extra->icon = 'direct|fa fa-plus';
+            $data["action"][] = $extra;
             /* ----------
              Table header
             ----------------------- */

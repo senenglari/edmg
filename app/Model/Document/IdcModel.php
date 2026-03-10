@@ -28,12 +28,16 @@ class IdcModel extends Model
     public function getCollections() {
         try {
             $query  = DB::table($this->table)
-                                ->select("$this->table.*", DB::RAW("DATE_FORMAT($this->table.receive_date, '%d/%m/%Y') AS rec_date"), DB::RAW("DATE_FORMAT($this->table.sender_date, '%d/%m/%Y') AS sen_date")
-                                        , DB::RAW("COUNT(incoming_transmittal_detail.document_id) AS unit"), "ref_vendor.name AS vendor_name", DB::RAW("DATE_FORMAT(return_date_plan, '%d/%m/%Y') AS deadline_return")
-                                        , DB::RAW("(CASE $this->table.status WHEN 1 THEN 'New' WHEN 2 THEN 'Approved' WHEN 3 THEN 'Reject' END) AS status_code")
-                                        , DB::RAW("(CASE $this->table.status WHEN 1 THEN 'Unassigned' WHEN 2 THEN 'Assigned' WHEN 3 THEN 'Reject' END) AS vendor_status_code"))
+                                ->select("$this->table.*", 
+                                        DB::RAW("DATE_FORMAT($this->table.receive_date, '%d/%m/%Y') AS rec_date"), 
+                                        DB::RAW("DATE_FORMAT($this->table.sender_date, '%d/%m/%Y') AS sen_date"),
+                                        DB::RAW("COUNT(incoming_transmittal_detail.document_id) AS unit"), 
+                                        "ref_vendor.name AS vendor_name", 
+                                        DB::RAW("DATE_FORMAT(return_date_plan, '%d/%m/%Y') AS deadline_return"),
+                                        DB::RAW("(CASE $this->table.status WHEN 1 THEN 'New' WHEN 2 THEN 'Approved' WHEN 3 THEN 'Reject' END) AS status_code"),
+                                        DB::RAW("(CASE $this->table.status WHEN 1 THEN 'Unassigned' WHEN 2 THEN 'Assigned' WHEN 3 THEN 'Reject' END) AS vendor_status_code"))
                                 ->join("incoming_transmittal_detail", "$this->table.incoming_transmittal_id", "incoming_transmittal_detail.incoming_transmittal_id")
-                                ->join("ref_vendor", "$this->table.vendor_id", "ref_vendor.vendor_id")
+                                ->leftjoin("ref_vendor", "$this->table.vendor_id", "ref_vendor.vendor_id")
                                 ->where("$this->table.status", "!=", 3)
                                 ->orderBy("$this->table.incoming_transmittal_id", "DESC")
                                 ->groupBy("$this->table.incoming_transmittal_id");
@@ -65,10 +69,8 @@ class IdcModel extends Model
             
             return array("status"=>true, "data"=>$result);
         } catch (\Exception $e) {
-            throw $e;
             return array("status"=>false, "data"=>[]);
         }
-    }
 
     public function getHeader($id) {
         $query      = DB::table($this->table)->select("$this->table.*", "ref_vendor.name AS vendor_name", "ref_vendor.email_address")
@@ -95,16 +97,15 @@ class IdcModel extends Model
 
     public function getItemTemp() {
         $query      = DB::table("incoming_transmittal_detail_temp")->select("incoming_transmittal_detail_temp.*", DB::RAW("IFNULL(document.document_no, incoming_transmittal_detail_temp.document_no) AS document_no"), DB::RAW("IFNULL(document.document_title, incoming_transmittal_detail_temp.document_title) as document_title"), "ref_document_status.name AS document_status_name"
-                                                                            , "ref_issue_status.name AS issue_status_name", "ref_return_status.name AS return_status_name")
-                                                                   ->leftjoin("document", "incoming_transmittal_detail_temp.document_id", "document.document_id")
-                                                                   ->leftJoin("ref_document_status", "incoming_transmittal_detail_temp.document_status_id", "ref_document_status.document_status_id")
-                                                                   ->leftJoin("ref_issue_status", "incoming_transmittal_detail_temp.issue_status_id", "ref_issue_status.issue_status_id")
-                                                                   ->leftJoin("ref_return_status", "incoming_transmittal_detail_temp.return_status_id", "ref_return_status.return_status_id")
-                                                                   ->where("incoming_transmittal_detail_temp.created_by", Auth::user()->id)
-                                                                   ->where("incoming_transmittal_detail_temp.issue_status_id", 1)
-                                                                   ->where("incoming_transmittal_detail_temp.document_status_id", 94)
-                                                                   ->orderBy("incoming_transmittal_detail_temp.incoming_transmittal_detail_temp_id")
-                                                                   ->get();
+                                            , "ref_issue_status.name AS issue_status_name", "ref_return_status.name AS return_status_name")
+                                       ->leftjoin("document", "incoming_transmittal_detail_temp.document_id", "document.document_id")
+                                       ->leftJoin("ref_document_status", "incoming_transmittal_detail_temp.document_status_id", "ref_document_status.document_status_id")
+                                       ->leftJoin("ref_issue_status", "incoming_transmittal_detail_temp.issue_status_id", "ref_issue_status.issue_status_id")
+                                       ->leftJoin("ref_return_status", "incoming_transmittal_detail_temp.return_status_id", "ref_return_status.return_status_id")
+                                       ->where("incoming_transmittal_detail_temp.created_by", Auth::user()->id)
+                                       ->where("incoming_transmittal_detail_temp.document_status_id", 94)
+                                       ->orderBy("incoming_transmittal_detail_temp.incoming_transmittal_detail_temp_id")
+                                       ->get();
 
         return $query;
     }
@@ -119,7 +120,6 @@ class IdcModel extends Model
         try {
             DB::table("incoming_transmittal_detail_temp")
                 ->where("document_id", $request->document_id)
-                ->where("issue_status_id", 1)
                 ->where("document_status_id", 94)
                 ->where("created_by", Auth::user()->id)
                 ->delete();
@@ -156,7 +156,7 @@ class IdcModel extends Model
                                 "document_file"=>$file_name,
                                 "document_crs"=>$file_crs,
                                 "remark"=>$request->remark,
-                                "issue_status_id"=> 1,
+                                "issue_status_id"=> $request->issue_status_id,
                                 "document_status_id"=> 94,
                                 "project_id"=>$request->project_id,
                                 "created_by"=>Auth::user()->id
@@ -202,7 +202,7 @@ class IdcModel extends Model
                 return array("status"=>false, "message"=>"Incoming number is already taken", "id"=>0);
             }
             # ------------------------
-            $qTempIncoming  = DB::table("incoming_transmittal_detail_temp")->select("*")->where("created_by", Auth::user()->id)->where("issue_status_id", STATUS_ONLY_IFI)->get();
+            $qTempIncoming  = DB::table("incoming_transmittal_detail_temp")->select("*")->where("created_by", Auth::user()->id)->get();
 
             foreach($qTempIncoming as $row_temp) {
                 $id_docs    = DB::table("document")
@@ -282,6 +282,11 @@ class IdcModel extends Model
                                                                        ->get();
 
             foreach($qTemp as $row) {
+                // Pastikan update issue_status_id di incoming_transmittal_detail sesuai pilihan user (langsung)
+                DB::table("incoming_transmittal_detail")
+                    ->where("document_id", $row->document_id)
+                    ->where("incoming_transmittal_id", $id)
+                    ->update(["issue_status_id" => $row->issue_status_id]);
                 // $new_url            = DOCUMENT_DIR . "/" . $id . "/" . str_replace(" ", "_", $row->dept_name);
                 // $new_dir            = public_path("/uploads") . DOCUMENT_DIR . "/" . $id . "/" . str_replace(" ", "_", $row->dept_name);
                 $new_url            = DOCUMENT_DIR . "/" . $id;
@@ -314,43 +319,6 @@ class IdcModel extends Model
                         if($success) {
                             // File::delete($source_dir_crs);
                         } else {
-                            return array("status"=>false, "message"=>FAILED_MESSAGE, "id"=>0);
-                        }
-                    }
-                }
-                # ------------------------
-                $id_detail = DB::table("incoming_transmittal_detail")
-                                        ->insertGetId([
-                                            "document_id"=>$row->document_id,
-                                            "document_url"=>$new_url . "/",
-                                            "document_file"=>$row->document_file,
-                                            "document_crs"=>$row->document_crs,
-                                            "incoming_transmittal_id"=>$id,
-                                            "remark"=>$row->remark,
-                                            "issue_status_incoming_id"=>$row->issue_status_id,
-                                            "issue_status_id"=>$row->issue_status_id,
-                                            "return_status_id"=>$row->return_status_id,
-                                            "document_status_id"=>$row->document_status_id,
-                                        ]);
-                # ------------------------
-                DB::table($this->table)
-                            ->where("incoming_transmittal_id", $id)
-                            ->update([
-                                "vendor_id"=>$row->vendor_id,
-                            ]);
-
-                // DB::table("document")
-                //             ->where("document_id", $row->document_id)
-                //             ->update([
-                //                 "deadline"=>$plan_date
-                //             ]);
-                # ------------------------
-                // DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$id_detail', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id', deadline = ADDDATE('$receive', INTERVAL sys_config.max_due_days DAY), status = 2 WHERE document_id = '$row->document_id'");
-                
-                // if($row->issue_status_id <= 3) {
-                //     /* ----------
-                //      Assign ulang hanya untuk status IDC, IFR/IFI, IFA
-                //     ----------------------- */
                 //     $cek_assign     = DB::table("assignment")->select("assignment_id", "incoming_transmittal_detail_id")->where("document_id", $row->document_id)->orderBy("assignment_id", "DESC")->get();
                     
                 //     if(count($cek_assign) > 0) {

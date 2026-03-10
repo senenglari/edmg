@@ -139,8 +139,26 @@ class="btn btn-sm btn-danger m-b-5">
 <a href="add/{{ encodedData($rs->incoming_transmittal_id) }}">
     <span class="label label-warning">Draft</span>
 </a>
+@elseif($field == 'issue_status')
+    <span class="label label-default">
+        ID: {{ $rs->issue_status_id ?? '-' }}
+        @if($rs->note_backdoor)
+            | Note: {{ $rs->note_backdoor }}
+        @endif
+    </span>
+@elseif($field == 'status_code')
+    {{-- Logic Status External --}}
+    @if(isset($rs->issue_status_id) && in_array($rs->issue_status_id, [1, 3, 5, 7]))
+        @if(($rs->note_backdoor ?? '') == 'DONE')
+            <span class="label" style="background-color: #006400; color: white;">DONE</span>
+        @else
+            <span class="label label-info">Done-External Progress</span>
+        @endif
+    @else
+        {!! getLabelFlag($rs->$field) !!}
+    @endif
 @else
-{!! getLabelFlag($rs->$field) !!}
+    {!! getLabelFlag($rs->$field) !!}
 @endif
 
                                                 @elseif ($row["item-format"] == "checkbox")

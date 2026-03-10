@@ -105,42 +105,12 @@ define('DEFAULT_APPROVER_DOCUMENT', 22);
 
 function getNextStatusApprove($status)
 {
-    switch ($status) {
-
-        case STATUS_IFC:
-            return STATUS_IFA;
-
-        case STATUS_IFA:
-            return STATUS_DONE;
-
-        case STATUS_IFR:
-            return STATUS_DONE;
-
-        case STATUS_IFI:
-            return STATUS_DONE;
-
-        default:
-            return $status;
-    }
+    // Kembalikan status yang dipilih user, tidak dipaksa ke status lain
+    return $status;
 }
 
 function getNextStatusReject($status)
 {
-    switch ($status) {
-
-        case STATUS_IFC:
-            return STATUS_RE_IFC;
-
-        case STATUS_IFA:
-            return STATUS_RE_IFA;
-
-        case STATUS_IFR:
-            return STATUS_RE_IFR;
-
-        case STATUS_IFI:
-            return STATUS_RE_IFI;
-
-        default:
-            return $status;
-    }
+    // Kembalikan status yang dipilih user, tidak dipaksa ke status lain
+    return $status;
 }

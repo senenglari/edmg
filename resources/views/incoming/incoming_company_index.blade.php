@@ -87,26 +87,20 @@
 
 @php
 
-$responsibility = DB::table('comment as c')
-->join('assignment as a','a.assignment_id','=','c.assignment_id')
-->where('a.document_id',$doc->document_id)
-->where('c.role','RESPONSIBILITY')
-->where('c.status_nonaktif',0)
-->count();
+// load detailed users per role so we can show tooltips and status coloring
+$users = DB::table('comment as c')
+    ->join('assignment as a','a.assignment_id','=','c.assignment_id')
+    ->join('sys_users as u','c.user_id','=','u.id')
+    ->where('a.document_id',$doc->document_id)
+    ->whereIn('c.role',['RESPONSIBLE','OWNER','APPROVER_COMPANY'])
+    ->where('c.status_nonaktif',0)
+    ->select('c.role','u.full_name','c.status','c.user_id')
+    ->orderBy('c.order_no')
+    ->get();
 
-$owner = DB::table('comment as c')
-->join('assignment as a','a.assignment_id','=','c.assignment_id')
-->where('a.document_id',$doc->document_id)
-->where('c.role','OWNER')
-->where('c.status_nonaktif',0)
-->count();
-
-$approver = DB::table('comment as c')
-->join('assignment as a','a.assignment_id','=','c.assignment_id')
-->where('a.document_id',$doc->document_id)
-->where('c.role','APPROVER')
-->where('c.status_nonaktif',0)
-->count();
+$responsible = $users->where('role','RESPONSIBLE');
+$owner        = $users->where('role','OWNER');
+$approver     = $users->where('role','APPROVER_COMPANY');
 
 @endphp
 
@@ -131,15 +125,20 @@ $approver = DB::table('comment as c')
 {{-- RESPONSIBILITY --}}
 <td style="text-align:center">
 
-@if($responsibility>0)
-
-@for($i=0;$i<$responsibility;$i++)
-<span class="btn btn-default btn-icon btn-xs"
-style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px;"></span>
-@endfor
-
+@if(count($responsible)>0)
+    @foreach($responsible as $u)
+        @php
+            $extra = '';
+            // highlight green if current user commented (status 2 or greater)
+            if(Auth::check() && $u->user_id == Auth::user()->id && $u->status >= 2) {
+                $extra = 'background-color:#00ff00; border-color:#00ff00;';
+            }
+        @endphp
+        <span class="btn btn-info btn-icon btn-xs" title="{{ $u->full_name }}"
+              style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px; background-color:#add8e6; border-color:#add8e6; {{ $extra }}"></span>
+    @endforeach
 @else
-<span class="text-muted">-</span>
+    <span class="text-muted">-</span>
 @endif
 
 </td>
@@ -147,15 +146,19 @@ style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px;"></s
 {{-- OWNER --}}
 <td style="text-align:center">
 
-@if($owner>0)
-
-@for($i=0;$i<$owner;$i++)
-<span class="btn btn-warning btn-icon btn-xs"
-style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px;"></span>
-@endfor
-
+@if(count($owner)>0)
+    @foreach($owner as $u)
+        @php
+            $extra = '';
+            if(Auth::check() && $u->user_id == Auth::user()->id && $u->status >= 2) {
+                $extra = 'background-color:#00ff00; border-color:#00ff00;';
+            }
+        @endphp
+        <span class="btn btn-warning btn-icon btn-xs" title="{{ $u->full_name }}"
+              style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px; {{ $extra }}"></span>
+    @endforeach
 @else
-<span class="text-muted">-</span>
+    <span class="text-muted">-</span>
 @endif
 
 </td>
@@ -163,15 +166,19 @@ style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px;"></s
 {{-- APPROVER --}}
 <td style="text-align:center">
 
-@if($approver>0)
-
-@for($i=0;$i<$approver;$i++)
-<span class="btn btn-info btn-icon btn-xs"
-style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px;"></span>
-@endfor
-
+@if(count($approver)>0)
+    @foreach($approver as $u)
+        @php
+            $extra = '';
+            if(Auth::check() && $u->user_id == Auth::user()->id && $u->status >= 2) {
+                $extra = 'background-color:#00ff00; border-color:#00ff00;';
+            }
+        @endphp
+        <span class="btn btn-info btn-icon btn-xs" title="{{ $u->full_name }}"
+              style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px; {{ $extra }}"></span>
+    @endforeach
 @else
-<span class="text-muted">-</span>
+    <span class="text-muted">-</span>
 @endif
 
 </td>
@@ -181,7 +188,31 @@ style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px;"></s
 </td>
 
 <td style="text-align:center">
-<span class="label label-success">DONE</span>
+    @php
+        $statusText = $doc->backdoor_status ?? '';
+        switch(strtolower($statusText)) {
+            case 'pending':
+                $labelClass = 'label-default';
+                break;
+            case 'on review':
+                $labelClass = 'label-info';
+                break;
+            case 'owner':
+                $labelClass = 'label-warning';
+                break;
+            case 'approver':
+                $labelClass = 'label-primary';
+                break;
+            case 'done':
+                $labelClass = 'label-success';
+                break;
+            default:
+                $labelClass = 'label-default';
+        }
+    @endphp
+    <span class="label {{ $labelClass }}">
+        {{ strtoupper($statusText ?: 'PENDING') }}
+    </span>
 </td>
 
 </tr>
@@ -190,7 +221,7 @@ style="width:12px;height:12px;margin-right:3px;padding:0;border-radius:2px;"></s
 
 <tr>
 <td colspan="9" class="text-center">
-Tidak ada dokumen DONE.
+Tidak ada dokumen.
 </td>
 </tr>
 

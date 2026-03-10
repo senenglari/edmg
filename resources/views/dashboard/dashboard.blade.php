@@ -42,7 +42,7 @@
         <div class="col-md-3 col-sm-6">
             <div class="widget widget-stats bg-blue" style="color: black;">
                 <div class="stats-icon stats-icon-lg"><i class="fa fa-legal fa-fw"></i></div>
-                <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">IFR</div>
+                <div class="stats-title" style="color: black; font-weight: bold; font-size: 14px;">IFC</div>
                 <div class="stats-number">{{ number_format($summary["data"]->afd_status, 0) }} document(s)<br>
                 0 overdue
                 </div>
@@ -76,7 +76,7 @@
                         <a href="javascript:;" class="btn btn-xs btn-icon btn-circle btn-default" data-click="panel-expand"><i class="fa fa-expand"></i></a>
                         <a href="javascript:;" class="btn btn-xs btn-icon btn-circle btn-warning" data-click="panel-collapse"><i class="fa fa-minus"></i></a>
                     </div>
-                    <h4 class="panel-title">IFR ~ Issue for Review</h4>
+                    <h4 class="panel-title">IFC ~ Issue for Comment</h4>
                 </div>
                 <div class="panel-body">
                     <table class="table">

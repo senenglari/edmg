@@ -40,9 +40,11 @@ class DocumentModel extends Model
                     "c.name as area_name",
                     "d.project_name",
                     "$this->table.status",
+                    "$this->table.issue_status_id",
+                    "$this->table.note_backdoor",
                     DB::Raw("concat(e.name,' - ', f.name) as issue_status"),
                     "e.name as document_status",
-                    db::Raw("(CASE $this->table.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code"),
+                    DB::Raw("(CASE $this->table.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code"),
                     db::Raw("COUNT(h.comment_id) AS unit"),
                     db::Raw("COUNT(IF((h.status = '2'),1,NULL)) AS done"),
                     db::Raw("COUNT(IF((h.status = '1'),1,NULL)) AS progress"),
@@ -176,9 +178,11 @@ return DB::table('document as a')
                     "c.name as area_name",
                     "d.project_name",
                     "$this->table.status",
+                    "$this->table.issue_status_id",
+                    "$this->table.note_backdoor",
                     DB::Raw("concat(e.name,' - ', f.name) as issue_status"),
                     "e.name as document_status",
-                    db::Raw("(CASE $this->table.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code"),
+                    DB::Raw("CASE $this->table.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code"),
                     db::Raw("COUNT(h.comment_id) AS unit"),
                     db::Raw("COUNT(IF((h.status = '2'),1,NULL)) AS done"),
                     db::Raw("COUNT(IF((h.status = '1'),1,NULL)) AS progress"),
@@ -1733,7 +1737,32 @@ return DB::table('document as a')
                     "incoming_transmittal.incoming_no",
                     "ref_return_status.name AS return_status_name",
                     "incoming_transmittal_detail.remark",
-                    db::Raw("(CASE $this->table.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code"),
+                    db::Raw("(
+                        CASE 
+                            WHEN (
+                                SELECT COUNT(*) FROM document d2 
+                                WHERE d2.document_id = $this->table.document_id
+                                AND d2.issue_status_id IN (1, 3, 5, 7)
+                                AND d2.note_backdoor = 'DONE'
+                            ) > 0 THEN 'DONE'
+                            WHEN (
+                                SELECT COUNT(*) FROM document d2 
+                                WHERE d2.document_id = $this->table.document_id
+                                AND d2.issue_status_id IN (1, 3, 5, 7)
+                                AND (d2.note_backdoor IS NULL OR d2.note_backdoor != 'DONE')
+                            ) > 0 THEN 'Done-External Progress'
+                            WHEN $this->table.status = 1 THEN 'Unissued' 
+                            WHEN $this->table.status = 2 THEN 'Waiting for reviewer' 
+                            WHEN $this->table.status = 3 THEN 'Waiting for compiler' 
+                            WHEN $this->table.status = 4 THEN 'Waiting for return' 
+                            WHEN $this->table.status = 5 THEN 'Waiting for approval' 
+                            WHEN $this->table.status = 7 THEN 'Waiting for view' 
+                            WHEN $this->table.status = 99 THEN 'Stored' 
+                            WHEN $this->table.status = 88 THEN 'Reject' 
+                            WHEN $this->table.status = 6 THEN 'Done' 
+                            ELSE CAST($this->table.status AS CHAR)
+                        END
+                    ) AS status_code"),
                     "ref_vendor.name AS vendor_name"
                 )
                 ->leftjoin("incoming_transmittal_detail", "$this->table.incoming_transmittal_detail_id", "incoming_transmittal_detail.incoming_transmittal_detail_id")
@@ -1956,9 +1985,11 @@ return DB::table('document as a')
                     "c.name as area_name",
                     "d.project_name",
                     "$this->table.status",
+                    "$this->table.issue_status_id",
+                    "$this->table.note_backdoor",
                     DB::Raw("concat(e.name,' - ', f.name) as issue_status"),
                     "e.name as document_status",
-                    db::Raw("(CASE $this->table.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code"),
+                    DB::Raw("CASE $this->table.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code"),
                     db::Raw("COUNT(h.comment_id) AS unit"),
                     db::Raw("COUNT(IF((h.status = '2'),1,NULL)) AS done"),
                     db::Raw("COUNT(IF((h.status = '1'),1,NULL)) AS progress"),

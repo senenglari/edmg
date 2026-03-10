@@ -135,7 +135,35 @@
                                             @if ($row["item-format"] == "number")
                                             {{ number_format($rs->$field, 0) }}
                                             @elseif ($row["item-format"] == "flag")
-                                            {!! getLabelFlag($rs->$field) !!}
+                                                @if($field == 'status_code')
+                                                    @if(in_array($rs->issue_status_id, [1, 3, 5, 7]))
+                                                        @if($rs->note_backdoor == 'DONE')
+                                                            <span class="label" style="background-color: #006400; color: white;">DONE</span>
+                                                        @else
+                                                            <span class="label" style="background-color: #11CE44; color: white;">Done-External Progress</span>
+                                                        @endif
+                                                    @else
+                                                        @if($rs->status == 1)
+                                                            <span class="label label-primary">New</span>
+                                                        @elseif($rs->status == 2)
+                                                            <span class="label label-success">Approved</span>
+                                                        @elseif($rs->status == 3)
+                                                            <span class="label label-danger">Reject</span>
+                                                        @elseif($rs->status == 4)
+                                                            <span class="label label-warning">Waiting for return</span>
+                                                        @elseif($rs->status == 5)
+                                                            <span class="label label-info">Waiting for approval</span>
+                                                        @elseif($rs->status == 6)
+                                                            <span class="label" style="background-color: #cea511; color: white;">On Progress</span>
+                                                        @elseif($rs->status == 7)
+                                                            <span class="label label-default">Waiting for view</span>
+                                                        @else
+                                                            <span class="label label-default">{{ $rs->status }}</span>
+                                                        @endif
+                                                    @endif
+                                                @else
+                                                    {!! getLabelFlag($rs->$field) !!}
+                                                @endif
                                             @elseif ($row["item-format"] == "checkbox")
                                             <input type="checkbox" id="checkbox_id_<?= $No ?>" name="checkbox_id[]" class="checkbox_id" value="{{ encodedData($rs->$field) }}">
                                             @elseif ($row["item-format"] == "checkbox")

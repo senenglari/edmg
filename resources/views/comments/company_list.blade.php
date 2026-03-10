@@ -34,7 +34,7 @@
 <td>
 
 <a class="btn btn-warning btn-sm"
-href="{{ url('comment_company/'.$doc->document_id) }}">
+href="{{ url('comment_company/'.$doc->document_id.'?role='.($doc->user_role ?? '')) }}">
 
 Comment
 

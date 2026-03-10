@@ -110,9 +110,9 @@
                                     <div class="col-md-6">
                                         <select name="role" class="form-control" required>
                                             <option value="">-- Pilih Role --</option>
-                                            <option value="RESPONSIBILITY">RESPONSIBILITY</option>
-                                            <option value="OWNER">OWNER</option>
-                                            <option value="APPROVER">APPROVER</option>
+                                            @foreach ($selectRole as $role)
+                                                <option value="{{ $role['id'] }}">{{ $role['name'] }}</option>
+                                            @endforeach
                                         </select>
                                     </div>
                                 </div>

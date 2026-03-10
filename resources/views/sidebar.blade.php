@@ -78,6 +78,13 @@
 <span>Comment Company</span>
 </a>
 </li>
+
+<li class="{{ request()->is('incoming_company/idc-external*') ? 'active' : '' }}">
+    <a href="{{ url('incoming_company/idc-external-list') }}">
+        <i class="fa fa-file-pdf-o"></i>
+        <span>IDC External</span>
+    </a>
+</li>
             
             </ul>
             <li><a href="javascript:void(0)" class="sidebar-minify-btn" data-click="sidebar-minify"><i class="fa fa-angle-double-left"></i></a></li>

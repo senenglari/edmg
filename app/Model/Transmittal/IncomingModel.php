@@ -121,13 +121,17 @@ private function getMaxSubNumericForCycle($document_id, $cycleLetter)
     public function getCollections() {
         try {
             $query  = DB::table($this->table)
-                                ->select("$this->table.*", DB::RAW("DATE_FORMAT($this->table.receive_date, '%d/%m/%Y') AS rec_date"), DB::RAW("DATE_FORMAT($this->table.sender_date, '%d/%m/%Y') AS sen_date")
-                                        , DB::RAW("COUNT(incoming_transmittal_detail.document_id) AS unit"), "ref_vendor.name AS vendor_name", DB::RAW("DATE_FORMAT(return_date_plan, '%d/%m/%Y') AS deadline_return")
-                                        , DB::RAW("(CASE $this->table.status WHEN 1 THEN 'New' WHEN 2 THEN 'Approved' WHEN 3 THEN 'Reject' END) AS status_code")
-                                        , DB::RAW("(CASE $this->table.status WHEN 1 THEN 'Unassigned' WHEN 2 THEN 'Assigned' WHEN 3 THEN 'Reject' END) AS vendor_status_code"))
+                                ->select("$this->table.*", 
+                                        DB::RAW("DATE_FORMAT($this->table.receive_date, '%d/%m/%Y') AS rec_date"), 
+                                        DB::RAW("DATE_FORMAT($this->table.sender_date, '%d/%m/%Y') AS sen_date"),
+                                        DB::RAW("COUNT(incoming_transmittal_detail.document_id) AS unit"), 
+                                        "ref_vendor.name AS vendor_name", 
+                                        DB::RAW("DATE_FORMAT(return_date_plan, '%d/%m/%Y') AS deadline_return"),
+                                        DB::RAW("(CASE $this->table.status WHEN 1 THEN 'New' WHEN 2 THEN 'Approved' WHEN 3 THEN 'Reject' END) AS status_code"),
+                                        DB::RAW("(CASE $this->table.status WHEN 1 THEN 'Unassigned' WHEN 2 THEN 'Assigned' WHEN 3 THEN 'Reject' END) AS vendor_status_code"))
                                 ->join("incoming_transmittal_detail", "$this->table.incoming_transmittal_id", "incoming_transmittal_detail.incoming_transmittal_id")
                                 ->leftjoin("ref_vendor", "$this->table.vendor_id", "ref_vendor.vendor_id")
-                                // ->where("$this->table.status", "!=", 3)
+                                ->where("$this->table.status", "!=", 3)
                                 ->orderBy("$this->table.incoming_transmittal_id", "DESC")
                                 ->groupBy("$this->table.incoming_transmittal_id");
 
@@ -550,7 +554,7 @@ public function getDocumentStatusByIssue($issue_status_id)
                                             "vendor_id"=>$row->vendor_id,
                                             "project_id"=>$row->project_id,
                                             "issue_status_incoming_id"=>2,
-                                            "issue_status_id"=>2,
+                                            "issue_status_id"=>$row->issue_status_id,
                                             "return_status_id"=>$row->return_status_id,
                                             "document_status_id"=>$row->document_status_id,
                                         ]);

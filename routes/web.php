@@ -56,28 +56,35 @@ Route::group(['prefix' => 'incoming_company'], function () {
     Route::get('/assignment/{document_id}', 'Transmittal\IncomingController@showIncomingAssignment')
         ->name('incoming_company.assignment');
 
+    // Halaman Incoming Company List
+    Route::get('/incoming-company-list', 'Transmittal\IncomingController@incomingCompanyList')
+        ->name('incoming_company.incoming_company_list');
+
     // Simpan Assignment (Incoming Company)
     Route::post('/assignment/{document_id}', 'Transmittal\IncomingController@storeIncomingAssignment')
         ->name('incoming_company.assignment.store');
+        
+    // External flow routes
+    Route::post('/external/complete/{document_id}', 'Transmittal\IncomingController@completeExternalFlow')
+        ->name('incoming_company.external.complete');
+        
+    // Delete user assignment
+    Route::get('/assignment/delete-user/{comment_id}', 'Transmittal\IncomingController@deleteAssignmentUser')
+        ->name('incoming_company.assignment.delete_user');
 
     // Detail Transmittal
     Route::get('/transmittal_detail/{document_id}', 'Transmittal\IncomingController@incomingCompanyTransmittalDetail')
         ->name('incoming_company.transmittal_detail');
         
         
-    Route::post('incoming_company/assignment/add-user', [IncomingController::class, 'add_assignment_user'])
-     ->name('incoming_company.assignment.add_user');    
-     
-     Route::post('assignment/add-user', [IncomingController::class, 'add_assignment_user'])
-         ->name('incoming_company.assignment.add_user');
-         
-         
-         Route::get('assignment/{id}', [IncomingController::class, 'showIncomingAssignment'])
-        ->name('incoming_company.assignment');
 
-    // Route untuk SIMPAN user baru (ini yang harus dipanggil form)
-    Route::post('assignment/{id}/add-user', [IncomingController::class, 'add_assignment_user'])
-        ->name('incoming_company.assignment.add_user');
+     
+
+         
+         
+
+
+
         
         
         
@@ -88,10 +95,30 @@ Route::group(['prefix' => 'incoming_company'], function () {
     Route::post('/comment/save', 
         'Transmittal\IncomingController@saveCommentCompany')
         ->name('incoming_company.comment.save');
-
+        
+    // Download attachment untuk company comment
+    Route::get('/comment/download/{comment_id}', 'Transmittal\IncomingController@downloadAttachmentCompany')
+        ->name('incoming_company.comment.download');
+        
+    // View document attachment (untuk tombol di form utama)
+    Route::get('/document/view/{document_id}', 'Transmittal\IncomingController@viewDocumentAttachment')
+        ->name('incoming_company.document.view');
+        
+    // IDC External workflow
+    Route::get('/idc-external-list', 'Transmittal\IncomingController@idcExternalList')
+        ->name('incoming_company.idc_external.list');
+        
+    Route::get('/idc-external/{document_id}', 'Transmittal\IncomingController@idcExternal')
+        ->name('incoming_company.idc_external');
+        
+    Route::post('/idc-external/{document_id}', 'Transmittal\IncomingController@saveIdcExternal')
+        ->name('incoming_company.idc_external.save');
+        
+    // quick approve (marks backdoor as done so it disappears from the list)
+    Route::post('/idc-external/approve/{document_id}', 'Transmittal\IncomingController@approveIdcExternal')
+        ->name('incoming_company.idc_external.approve');
         
 });
-
 
 Route::prefix('comment_company')->group(function(){
 

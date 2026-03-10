@@ -217,18 +217,15 @@ class CommentsController extends Controller
 
             if($currentStatus == STATUS_IFC || $currentStatus == STATUS_RE_IFC){
                 $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFC);
-            
             }else if($currentStatus == STATUS_IFA || $currentStatus == STATUS_RE_IFA){
                 $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFA);
-            
             }else if($currentStatus == STATUS_IFR || $currentStatus == STATUS_RE_IFR){
                 $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFR);
-            
             }else if($currentStatus == STATUS_IFI || $currentStatus == STATUS_RE_IFI){
                 $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFI);
-            
             }else{
-                $qIssueStatus = $this->qReference->getSelectIssueStatusComments(STATUS_FLOW_IFC);
+                // Tampilkan semua status aktif jika status tidak termasuk flow utama
+                $qIssueStatus = $this->qReference->getSelectIssueStatus();
             }
             // $stsApproval           = ($qDataComment->order_no == $data["header"]->order_no) ? "APPROVAL" : "-";
             $stsApproval           = ($qUserComment->role == 'APPROVER') ? "APPROVER" : "-";

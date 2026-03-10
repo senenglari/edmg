@@ -18,6 +18,9 @@ use App\Model\Transmittal\IncomingModel;
 use App\Model\Document\DocumentModel;
 use App\Model\Sys\SysModel;
 use App\Model\Sys\LogModel;
+use App\Helpers\Constants;
+use ZipArchive;
+use File;
 
 
 
@@ -302,11 +305,28 @@ public function getDocumentStatusByIssue($issue_status_id)
 
 public function showIncomingAssignment($documentId)
 {
-    //echo 'xxx';die;
-    // dokumen harus ada dan status >= 6
+    // dokumen harus ada dan status IFC/IFA/IFI (external flow)
     $doc = DB::table('document')->where('document_id', $documentId)->first();
-    abort_if(!$doc, 404, 'Dokumen tidak ditemukan.');
-    abort_if($doc->status < 6, 403, 'Dokumen belum selesai (status kurang dari DONE).');
+
+    // jika tidak ditemukan, kembali ke daftar dengan pesan
+    if (!$doc) {
+        return redirect()->route('incoming_company.index')
+                         ->with('error_message', 'Dokumen tidak ditemukan.');
+    }
+
+    // Accept external flow statuses: IFC (1), IFA (3), IFI (7)
+    $externalStatusIds = [STATUS_IFC, STATUS_IFA, STATUS_IFI];
+    if (!in_array($doc->issue_status_id, $externalStatusIds)) {
+        return redirect()->route('incoming_company.index')
+                         ->with('error_message', 'Dokumen bukan external flow (bukan IFC/IFA/IFI).');
+    }
+
+    // debug logging (bisa dihapus saat sudah stabil)
+    \Log::info('ShowIncomingAssignment called', [
+        'documentId' => $documentId,
+        'doc_exists' => true,
+        'issue_status_id' => $doc->issue_status_id
+    ]);
 
     // === USERS LENGKAP UNTUK MODAL ADD USERS ===
     $users = DB::table('sys_users')
@@ -326,13 +346,28 @@ public function showIncomingAssignment($documentId)
 
     // === ROLE KHUSUS Incoming Company ===
     $selectRole = [
-        ['id' => 'RESPONSIBILITY', 'name' => 'RESPONSIBILITY'],
+        ['id' => 'RESPONSIBLE', 'name' => 'RESPONSIBLE'],
         ['id' => 'OWNER',          'name' => 'OWNER'],
-        ['id' => 'APPROVER',       'name' => 'APPROVER'],
+        ['id' => 'APPROVER_COMPANY', 'name' => 'APPROVER COMPANY'],
     ];
 
     // === DATA ASSIGNMENT YANG SUDAH ADA (untuk tabel) ===
    // === DATA ASSIGNMENT YANG SUDAH ADA (untuk tabel) ===
+   
+   // Debug: Log document info
+   \Log::info('Document Info for Assignment: ' . json_encode([
+       'document_id' => $documentId,
+       'doc_exists' => $doc ? true : false,
+       'doc_issue_status_id' => $doc->issue_status_id ?? null
+   ]));
+   
+   // Debug: Log assignment header
+   $assignmentHeader = DB::table('assignment')
+       ->where('document_id', $documentId)
+       ->where('status_nonaktif', 0)
+       ->first();
+   \Log::info('Assignment Header: ' . json_encode($assignmentHeader));
+   
 $comment = DB::table('comment as c')
     ->join('sys_users as u', 'c.user_id', '=', 'u.id')
     ->leftJoin('ref_department as d', 'u.department_id', '=', 'd.department_id')
@@ -342,8 +377,11 @@ $comment = DB::table('comment as c')
         $q->select(DB::raw(1))
           ->from('assignment as a')
           ->whereColumn('a.assignment_id', 'c.assignment_id')
-          ->where('a.document_id', $documentId);
+          ->where('a.document_id', $documentId)
+          ->where('a.status_nonaktif', 0);
     })
+    ->whereIn('c.role', ['RESPONSIBLE', 'OWNER', 'APPROVER_COMPANY']) // Filter untuk external flow roles
+    ->where('c.status_nonaktif', 0) // Tambah filter non-aktif
     ->select(
         'c.comment_id',              // ← primary key yang benar
         'c.user_id',
@@ -360,6 +398,48 @@ $comment = DB::table('comment as c')
     )
     ->orderBy('c.order_no')
     ->get();
+    
+    // Debug: Log comment results
+    \Log::info('Comment Query Results: ' . json_encode([
+        'count' => $comment->count(),
+        'data' => $comment->toArray()
+    ]));
+    
+    // Fallback: Jika tidak ada assignment, coba query langsung ke comment tanpa whereExists
+    if ($comment->count() == 0) {
+        \Log::info('Trying fallback query without whereExists...');
+        
+        $comment = DB::table('comment as c')
+            ->join('sys_users as u', 'c.user_id', '=', 'u.id')
+            ->leftJoin('ref_department as d', 'u.department_id', '=', 'd.department_id')
+            ->leftJoin('ref_discipline as ds', 'u.discipline_id', '=', 'ds.discipline_id')
+            ->leftJoin('ref_position as p', 'u.position_id', '=', 'p.position_id')
+            ->join('assignment as a', 'a.assignment_id', '=', 'c.assignment_id')
+            ->where('a.document_id', $documentId)
+            ->where('a.status_nonaktif', 0)
+            ->whereIn('c.role', ['RESPONSIBLE', 'OWNER', 'APPROVER_COMPANY'])
+            ->where('c.status_nonaktif', 0)
+            ->select(
+                'c.comment_id',
+                'c.user_id',
+                'c.role',
+                'c.start_date',
+                'c.end_date',
+                'c.status',
+                'c.order_no',
+                'u.full_name',
+                'd.name as department_name',
+                'ds.name as discipline_name',
+                'p.name as position_name'
+            )
+            ->orderBy('c.order_no')
+            ->get();
+            
+        \Log::info('Fallback Query Results: ' . json_encode([
+            'count' => $comment->count(),
+            'data' => $comment->toArray()
+        ]));
+    }
 
     // variabel lain yang dibutuhkan blade
     $title                = 'Assignment (Incoming Company) - '.($doc->document_no ?? $documentId);
@@ -385,15 +465,20 @@ $comment = DB::table('comment as c')
 
 public function storeIncomingAssignment(Request $request, $documentId)
 {
+    // Debug: Tampilkan request data sebelum validation
+    \Log::info('Assignment Request Before Validation: ' . json_encode($request->all()));
+    
     $request->validate([
         'user_id' => 'required',
-        'user_id.*' => 'required|integer|exists:sys_users,id',
-        'role' => 'required',
-        'role' => 'required',
+        'role' => 'required|in:RESPONSIBLE,OWNER,APPROVER_COMPANY',
     ]);
 
     $doc = DB::table('document')->where('document_id', $documentId)->first();
     abort_if(!$doc, 404, 'Dokumen tidak ditemukan.');
+    
+    // Accept external flow statuses: IFC (1), IFA (3), IFI (7)
+    $externalStatusIds = [STATUS_IFC, STATUS_IFA, STATUS_IFI];
+    abort_if(!in_array($doc->issue_status_id, $externalStatusIds), 403, 'Dokumen bukan external flow (bukan IFC/IFA/IFI).');
 
     DB::transaction(function () use ($request, $doc) {
 
@@ -418,18 +503,37 @@ public function storeIncomingAssignment(Request $request, $documentId)
 // print_r($request->user_id);
 //die;
 
-
-$rolex=$request->role;
-$user_id=$request->user_id;
-        // Simpan user
-       // foreach ($request->user_id as $idx => $user_id) {
-            //$role = $request->role[$idx] ?? 'RESPONSIBILITY';
-//echo $role;
-
+        // Debug: Tampilkan request data
+        \Log::info('Assignment Request Data: ' . json_encode($request->all()));
+        
+        // Simpan user - handle multiple users
+        if (is_array($request->user_id)) {
+            // Multiple users selected
+            foreach ($request->user_id as $idx => $user_id) {
+                $role = is_array($request->role) ? ($request->role[$idx] ?? 'RESPONSIBLE') : $request->role;
+                
+                DB::table('comment')->insert([
+                    'assignment_id'   => (int) $assignmentId,
+                    'user_id'         => (int) $user_id,
+                    'role'            => $role,
+                    'start_date'      => null,
+                    'end_date'        => null,
+                    'remark'          => null,
+                    'issue_status_id' => 0,
+                    'return_status_id'=> 0,
+                    'status'          => 10,
+                    'order_no'        => 1,
+                    'created_by'      => Auth::id() ?? 0,
+                    'created_at'      => now(),
+                    'status_nonaktif' => 0,
+                ]);
+            }
+        } else {
+            // Single user selected
             DB::table('comment')->insert([
                 'assignment_id'   => (int) $assignmentId,
-                'user_id'         => (int) $user_id,
-                'role'            => $rolex,
+                'user_id'         => (int) $request->user_id,
+                'role'            => $request->role,
                 'start_date'      => null,
                 'end_date'        => null,
                 'remark'          => null,
@@ -441,7 +545,7 @@ $user_id=$request->user_id;
                 'created_at'      => now(),
                 'status_nonaktif' => 0,
             ]);
-       // }
+        }
     });
 
 //echo "www";
@@ -454,6 +558,272 @@ $user_id=$request->user_id;
  
  
 // app/Http/Controllers/Transmittal/IncomingController.php
+
+/**
+ * FLOW EXTERNAL - 3 Level Assignment
+ * RESPONSIBLE (viewer) -> OWNER (reviewer) -> APPROVER (final approval)
+ */
+public function createExternalFlow(Request $request)
+{
+    try {
+        DB::beginTransaction();
+        
+        // 1. Create transmittal company record
+        $transmittalId = DB::table('incoming_transmittal')->insertGetId([
+            'incoming_no' => $request->incoming_no,
+            'vendor_id' => $request->vendor_id,
+            'project_id' => $request->project_id,
+            'subject' => $request->subject,
+            'content' => $request->content,
+            'sender_date' => now(),
+            'receive_date' => now(),
+            'status' => 1, // Active
+            'created_by' => Auth::id(),
+            'created_at' => now(),
+        ]);
+        
+        // 2. Process documents from temp table
+        $tempDocuments = DB::table('incoming_transmittal_detail_temp')
+            ->where('created_by', Auth::id())
+            ->get();
+            
+        foreach ($tempDocuments as $doc) {
+            // Insert to incoming_transmittal_detail
+            $detailId = DB::table('incoming_transmittal_detail')->insertGetId([
+                'incoming_transmittal_id' => $transmittalId,
+                'document_id' => $doc->document_id,
+                'document_no' => $doc->document_no,
+                'document_title' => $doc->document_title,
+                'document_url' => $doc->document_url,
+                'document_file' => $doc->document_file,
+                'document_crs' => $doc->document_crs,
+                'vendor_id' => $doc->vendor_id,
+                'project_id' => $doc->project_id,
+                'issue_status_id' => $doc->issue_status_id, // IFC, IFA, IFI, atau IFI
+                'document_status_id' => $doc->document_status_id,
+                'return_status_id' => 1,
+                'remark' => $doc->remark,
+                'created_by' => Auth::id(),
+                'created_at' => now(),
+            ]);
+            
+            // 3. Create assignment header
+            $assignmentId = DB::table('assignment')->insertGetId([
+                'document_id' => $doc->document_id,
+                'incoming_transmittal_detail_id' => $detailId,
+                'status_nonaktif' => 0,
+                'created_by' => Auth::id(),
+                'created_at' => now(),
+            ]);
+            
+            // 4. Auto assign RESPONSIBLE users (viewer role)
+            $responsibleUsers = DB::table('sys_users')
+                ->where('role', 'RESPONSIBLE')
+                ->where('status', 1)
+                ->get();
+                
+            foreach ($responsibleUsers as $user) {
+                DB::table('comment')->insert([
+                    'assignment_id' => $assignmentId,
+                    'user_id' => $user->id,
+                    'role' => 'RESPONSIBLE',
+                    'start_date' => now(),
+                    'end_date' => null,
+                    'remark' => 'Auto assigned as viewer',
+                    'issue_status_id' => 0,
+                    'return_status_id' => 0,
+                    'status' => 1, // Active
+                    'order_no' => 1,
+                    'created_by' => Auth::id(),
+                    'created_at' => now(),
+                    'status_nonaktif' => 0,
+                ]);
+            }
+        }
+        
+        // 5. Clear temp table
+        DB::table('incoming_transmittal_detail_temp')
+            ->where('created_by', Auth::id())
+            ->delete();
+            
+        DB::commit();
+        
+        return redirect()->route('incoming_company.index')
+            ->with('success_message', 'External flow transmittal created successfully');
+            
+    } catch (\Exception $e) {
+        DB::rollback();
+        return redirect()->back()
+            ->with('error_message', 'Error creating external flow: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Check if all RESPONSIBLE users have completed their review
+ * If yes, auto-assign to OWNER users
+ */
+public function checkResponsibleCompletion($documentId)
+{
+    $document = DB::table('document')->where('document_id', $documentId)->first();
+    $assignment = DB::table('assignment')
+        ->where('document_id', $documentId)
+        ->where('status_nonaktif', 0)
+        ->first();
+        
+    if (!$document || !$assignment) {
+        return false;
+    }
+    
+    // Check if all RESPONSIBLE users have commented (use comment role)
+    $responsibleCount = DB::table('comment')
+        ->where('assignment_id', $assignment->assignment_id)
+        ->where('role', 'RESPONSIBLE')
+        ->where('status', 2) // Completed
+        ->count();
+        
+    // total responsible users recorded in comments
+    $totalResponsible = DB::table('comment')
+        ->where('assignment_id', $assignment->assignment_id)
+        ->where('role', 'RESPONSIBLE')
+        ->distinct('user_id')
+        ->count('user_id');
+        
+    // If all responsible users completed, assign to OWNER
+    if ($responsibleCount >= $totalResponsible) {
+        $ownerUsers = DB::table('sys_users')
+            ->where('role', 'OWNER')
+            ->where('status', 1)
+            ->get();
+            
+        foreach ($ownerUsers as $user) {
+            DB::table('comment')->insert([
+                'assignment_id' => $assignment->assignment_id,
+                'user_id' => $user->id,
+                'role' => 'OWNER',
+                'start_date' => now(),
+                'end_date' => null,
+                'remark' => 'Auto assigned after RESPONSIBLE completion',
+                'issue_status_id' => 0,
+                'return_status_id' => 0,
+                'status' => 1, // Active
+                'order_no' => 2,
+                'created_by' => Auth::id(),
+                'created_at' => now(),
+                'status_nonaktif' => 0,
+            ]);
+        }
+        
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Check if all OWNER users have completed their review
+ * If yes, auto-assign to APPROVER users
+ */
+public function checkOwnerCompletion($documentId)
+{
+    $document = DB::table('document')->where('document_id', $documentId)->first();
+    $assignment = DB::table('assignment')
+        ->where('document_id', $documentId)
+        ->where('status_nonaktif', 0)
+        ->first();
+        
+    if (!$document || !$assignment) {
+        return false;
+    }
+    
+    // Check if all OWNER users have commented (use comment rows, sys_users has no role field)
+    $ownerCount = DB::table('comment')
+        ->where('assignment_id', $assignment->assignment_id)
+        ->where('role', 'OWNER')
+        ->where('status', 2) // Completed
+        ->count();
+        
+    // total owners originally assigned to this document
+    $totalOwner = DB::table('comment')
+        ->where('assignment_id', $assignment->assignment_id)
+        ->where('role', 'OWNER')
+        ->distinct('user_id')
+        ->count('user_id');
+        
+    // If all owner users completed, assign to APPROVER COMPANY
+    if ($ownerCount >= $totalOwner) {
+        // advance backdoor stage to Approver (5)
+        DB::table('document')->where('document_id',$documentId)->update(['note_backdoor'=>'5']);
+
+        // note: approver assignment removed to avoid sys_users.role lookup
+    // stage already moved to 5 above when owners complete
+        
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Complete external flow - final approval by APPROVER
+ */
+public function completeExternalFlow(Request $request, $documentId)
+{
+    try {
+        DB::beginTransaction();
+        
+        // Update document status to DONE
+        DB::table('document')
+            ->where('document_id', $documentId)
+            ->update([
+                'status' => 6, // DONE
+                'updated_at' => now(),
+            ]);
+            
+        // Update all comments for this document to completed
+        DB::table('comment')
+            ->where('document_id', $documentId)
+            ->update([
+                'status' => 2, // Completed
+                'end_date' => now(),
+                'updated_at' => now(),
+            ]);
+            
+        DB::commit();
+        
+        return redirect()->route('incoming_company.index')
+            ->with('success_message', 'External flow completed successfully');
+            
+    } catch (\Exception $e) {
+        DB::rollback();
+        return redirect()->back()
+            ->with('error_message', 'Error completing external flow: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Delete user assignment dari external company
+ */
+public function deleteAssignmentUser($commentId)
+{
+    try {
+        // Delete comment record
+        $deleted = DB::table('comment')
+            ->where('comment_id', $commentId)
+            ->delete();
+            
+        if ($deleted) {
+            return redirect()->back()
+                ->with('success_message', 'User assignment berhasil dihapus');
+        } else {
+            return redirect()->back()
+                ->with('error_message', 'User assignment tidak ditemukan');
+        }
+        
+    } catch (\Exception $e) {
+        return redirect()->back()
+            ->with('error_message', 'Error menghapus user assignment: ' . $e->getMessage());
+    }
+}
 
 /**
  * Entry point untuk Assignment Incoming Company
@@ -552,7 +922,9 @@ public function incomingCompanyTransmittalDetail($documentId)
 
 public function incomingCompanyIndex(\Illuminate\Http\Request $request)
 {
-    // ambil data DONE = status 6
+    // Tampilkan dokumen dengan status IFC (1), IFA (3), IFI (7), dan IFI (7)
+    $externalStatusIds = [STATUS_IFC, STATUS_IFA, STATUS_IFI, STATUS_IFI]; // 1, 3, 7, 7
+    
     $q = DB::table('document AS d')
         ->leftJoin('ref_vendor AS v', 'v.vendor_id', '=', 'd.vendor_id')
         ->leftJoin('ref_issue_status AS is', 'is.issue_status_id', '=', 'd.issue_status_id')
@@ -561,20 +933,71 @@ public function incomingCompanyIndex(\Illuminate\Http\Request $request)
             'd.document_no',
             'd.document_title',
             'd.status',
+            'd.issue_status_id',
             'd.incoming_transmittal_detail_id',
             'v.name AS vendor_name',
             'is.name AS issue_status_name',
             'd.created_at',
+            'd.note_backdoor', // actual column name in document table
+            // compute human-readable stage for external flow
+            DB::RAW("(CASE WHEN d.note_backdoor IS NULL OR d.note_backdoor = '' THEN 'Pending' WHEN d.note_backdoor = '3' THEN 'On Review' WHEN d.note_backdoor = '4' THEN 'Owner' WHEN d.note_backdoor = '5' THEN 'Approver' WHEN d.note_backdoor = '6' THEN 'Done' ELSE d.note_backdoor END) AS backdoor_status"),
             'd.deadline'
         )
-        ->where('d.status', 6); // DONE
+        ->whereIn('d.issue_status_id', $externalStatusIds) // IFC, IFA, IFI
+        ->orderBy('d.issue_status_id') // Group by status
+        ->orderByDesc('d.document_id');
 
-    $documents = $q->orderByDesc('d.document_id')
-                   ->paginate(25)
-                   ->appends($request->query());
+    // Add filters if needed
+    if ($request->has('vendor_id') && $request->vendor_id) {
+        $q->where('d.vendor_id', $request->vendor_id);
+    }
+    
+    if ($request->has('issue_status_id') && $request->issue_status_id) {
+        $q->where('d.issue_status_id', $request->issue_status_id);
+    }
 
-    $title = 'Incoming Company – Dokumen DONE';
-    return view('incoming/incoming_company_index', compact('documents', 'title'));
+    // backdoor status filtering
+    if ($request->has('status') && $request->status) {
+        switch ($request->status) {
+            case 'pending':
+                $q->where(function($q2) {
+                    $q2->whereNull('d.note_backdoor')->orWhere('d.note_backdoor', '');
+                });
+                break;
+            case 'on_review':
+                $q->where('d.note_backdoor', '3');
+                break;
+            case 'owner':
+                $q->where('d.note_backdoor', '4');
+                break;
+            case 'approver':
+                $q->where('d.note_backdoor', '5');
+                break;
+            case 'done':
+                $q->where('d.note_backdoor', '6');
+                break;
+        }
+    }
+
+    $documents = $q->paginate(25)->appends($request->query());
+
+    // Get status options for filter
+    // note_backdoor workflow: null/empty -> Pending (IDC External bucket),
+    // 3=On Review, 4=Owner, 5=Approver, 6=Done
+    $statusOptions = [
+        ['id' => STATUS_IFC, 'name' => 'IFC'],
+        ['id' => STATUS_IFA, 'name' => 'IFA'], 
+        ['id' => STATUS_IFI, 'name' => 'IFI'],
+        ['id' => STATUS_IFI, 'name' => 'IFI'],
+        ['id' => 'pending', 'name' => 'Pending'],
+        ['id' => 'on_review', 'name' => 'On Review'],
+        ['id' => 'owner', 'name' => 'Owner'],
+        ['id' => 'approver', 'name' => 'Approver'],
+        ['id' => 'done', 'name' => 'Done'],
+    ];
+
+    $title = 'Incoming Company – External Documents (IFC/IFA/IFI)';
+    return view('incoming.incoming_company_index', compact('documents', 'title', 'statusOptions'));
 }
     
     
@@ -583,59 +1006,129 @@ public function incomingCompanyIndex(\Illuminate\Http\Request $request)
 
 public function commentCompany($documentId)
 {
+    // make sure id is numeric
+    $doc = DB::table('document')
+        ->leftJoin('ref_issue_status as is','is.issue_status_id','=','document.issue_status_id')
+        ->where('document.document_id',$documentId)
+        ->select('document.*','is.name as issue_status_name')
+        ->first();
+    if (!$doc) {
+        return back()->with('error_message','Document not found');
+    }
 
-$doc = DB::table('document')
-->where('document_id',$documentId)
-->first();
+    $comments = DB::table('comment as c')
+        ->join('assignment as a','a.assignment_id','=','c.assignment_id')
+        ->join('sys_users as u','u.id','=','c.user_id')
+        ->leftJoin('ref_issue_status as ris','c.issue_status_id','=','ris.issue_status_id')
+        ->where('a.document_id',$documentId)
+        ->where('c.status_nonaktif',0)
+        ->orderBy('c.order_no')
+        ->get([
+            'c.comment_id',
+            'c.role',
+            'c.remark',
+            'c.status',
+            // use name instead of numeric id
+            DB::raw('ris.name AS revision_status'),
+            'c.return_status_id',
+            'u.full_name'
+        ]);
 
-$comments = DB::table('comment as c')
-->join('assignment as a','a.assignment_id','=','c.assignment_id')
-->join('sys_users as u','u.id','=','c.user_id')
-->where('a.document_id',$documentId)
-->where('c.status_nonaktif',0)
-->orderBy('c.order_no')
-->get([
-'c.comment_id',
-'c.role',
-'c.remark',
-'c.status',
-'u.full_name'
-]);
+    $editComment = null;
+    if (request()->has('edit_id')) {
+        $editComment = DB::table('comment')
+            ->where('comment_id', request('edit_id'))
+            ->first();
+    }
 
-$title="Comment Company - ".$doc->document_no;
 
-return view('comments.company_comment',compact(
-'comments','doc','title'
-));
 
+    // return status options from reference table (status = 1)
+    $returnStatusOptions = DB::table('ref_return_status')
+        ->where('status',1)
+        ->pluck('name','return_status_id');
+
+    // role passed from the list page (per-document role from comment table)
+    $docRole = request('role', '');
+
+    // compute next-stage selections when the user acts as approver for this document
+    $nextStageOptions = [];
+    if (in_array($docRole, ['APPROVER_COMPANY','ADMINISTRATOR'])) {
+        // always show 6 fixed options: revision (RE-) or accept
+        $nextStageOptions = [
+            'rev-ifc'    => 'RE-IFC',
+            'accept-ifc' => 'IFC',
+            'rev-ifa'    => 'RE-IFA',
+            'accept-ifa' => 'IFA',
+            'rev-ifi'    => 'RE-IFI',
+            'accept-ifi' => 'IFI',
+        ];
+        // store in session for validation during save
+        session()->put('nextStageOptions', $nextStageOptions);
+    }
+
+    $title = "Comment Company - ".$doc->document_no;
+
+    return view('comments.company_comment', compact(
+        'comments','doc','title','editComment','returnStatusOptions','nextStageOptions','docRole'
+    ));
 }
-    
-    
+
+
 public function commentCompanyList()
 {
+    $userId = Auth::id();
 
-$userId = Auth::id();
+    $documents = DB::table('document as d')
+    ->join('assignment as a','a.document_id','=','d.document_id')
+    ->join('comment as c','c.assignment_id','=','a.assignment_id')
+    ->leftJoin('ref_vendor as v','v.vendor_id','=','d.vendor_id')
+    ->leftJoin('ref_issue_status as is','is.issue_status_id','=','d.issue_status_id')
+    ->where('c.user_id',$userId)
+    ->whereIn('c.role',['RESPONSIBLE','OWNER','APPROVER_COMPANY'])
+    ->where('c.status','<',30)
+    // hide documents that are already revised (2) or done (6)
+    ->whereNotIn('d.note_backdoor', ['2', '6'])
+    // if user is OWNER, hide documents already at backdoor stage 5 (approver stage)
+    ->where(function($q){
+        $q->where('c.role','!=','OWNER')
+          ->orWhere('d.note_backdoor','<>','5');
+    })
+    ->select(
+        'd.document_id',
+        'd.document_no',
+        'd.document_title',
+        'd.issue_status_id',
+        'is.name as issue_status_name',
+        'v.name as vendor_name',
+        'd.note_backdoor',
+        'c.role as user_role'
+    )
+    ->distinct()
+    ->orderBy('d.document_id','desc')
+    ->paginate(20);
 
-$documents = DB::table('document as d')
-->join('assignment as a','a.document_id','=','d.document_id')
-->join('comment as c','c.assignment_id','=','a.assignment_id')
-->leftJoin('ref_vendor as v','v.vendor_id','=','d.vendor_id')
-->where('c.user_id',$userId)
-->where('d.status',6)
-->select(
-'d.document_id',
-'d.document_no',
-'d.document_title',
-'v.name as vendor_name'
-)
-->distinct()
-->orderBy('d.document_id','desc')
-->paginate(20);
 
-$title="Comment Company";
+// compute title according to role of first document or default
+$title = 'Comment Company';
+if ($documents->count()) {
+    $firstDocId = $documents[0]->document_id;
+    $firstRole = DB::table('comment as c')
+        ->join('assignment as a','a.assignment_id','=','c.assignment_id')
+        ->where('a.document_id',$firstDocId)
+        ->where('c.user_id',$userId)
+        ->value('c.role');
+    if ($firstRole == 'OWNER') {
+        $title = 'Comment Company - Owner Documents';
+    } elseif ($firstRole == 'APPROVER_COMPANY') {
+        $title = 'Comment Company - Approver Documents';
+    } else {
+        $title = 'Comment Company - Responsible Documents';
+    }
+}
 
 return view('comments.company_list',compact(
-'documents','title'
+    'documents','title'
 ));
 
 }
@@ -644,255 +1137,1016 @@ return view('comments.company_list',compact(
     
   public function saveCommentCompany(Request $request)
 {
-
-$request->validate([
-'comment_id'=>'required',
-'remark'=>'required',
-'status'=>'required|in:10,20,30'
-]);
-
-DB::table('comment')
-->where('comment_id',$request->comment_id)
-->update([
-'remark'=>$request->remark,
-'status'=>$request->status,
-'updated_by'=>Auth::id(),
-'updated_at'=>now()
-]);
-
-return back()->with('success_message','Comment berhasil disimpan');
-
-}  
-    
-    
-    
-    
-
-    
-/*===================================*/    
-    
-    
-
-    public function unfilter() {
-        session()->forget("SES_SEARCH_INCOMING_NO");
-        session()->forget("SES_SEARCH_INCOMING_RECEIVE");
-        session()->forget("SES_SEARCH_INCOMING_SUBJECT");
-        session()->forget("SES_SEARCH_INCOMING_VENDOR");
-        # ---------------
-        if($this->isVendor == "YES") {
-            return redirect("/vendor_outgoing/index");
-        } else {
-            return redirect("/incoming/index");
+    // allow both new and existing comments
+    $rules = [
+        'remark'=>'required',
+        'status'=>'required|in:10,20,30',
+        'return_status_id'=>'nullable|integer',
+        'document_id'=>'required|integer'
+    ];
+    // approver gets next_stage choices — validate only when the field was submitted
+    if ($request->filled('next_stage')) {
+        $validKeys = array_keys($request->session()->get('nextStageOptions', []));
+        if (empty($validKeys)) {
+            $validKeys = [
+                'rev-ifc',
+                'accept-ifc',
+                'rev-ifa',
+                'accept-ifa',
+                'rev-ifi',
+                'accept-ifi',
+            ];
         }
+        $rules['next_stage'] = 'required|in:'.implode(',', $validKeys);
+    }
+    if ($request->filled('comment_id')) {
+        $rules['comment_id'] = 'integer';
+    }
+    $request->validate($rules);
+
+    // determine value from document
+    $issueStatus = DB::table('document')->where('document_id',$request->document_id)->value('issue_status_id');
+
+    // always update existing comment — find by comment_id or by user+document
+    $targetCommentId = $request->filled('comment_id') ? $request->comment_id : null;
+
+    if (!$targetCommentId) {
+        // find the current user's comment for this document
+        $userComment = DB::table('comment as c')
+            ->join('assignment as a', 'a.assignment_id', '=', 'c.assignment_id')
+            ->where('a.document_id', $request->document_id)
+            ->where('c.user_id', Auth::id())
+            ->select('c.comment_id')
+            ->first();
+        $targetCommentId = $userComment ? $userComment->comment_id : null;
     }
 
-    public function add($id = null){
+    if ($targetCommentId) {
+        // update existing comment
+        DB::table('comment')
+            ->where('comment_id', $targetCommentId)
+            ->update([
+                'remark'=>$request->remark,
+                'status'=>$request->status,
+                'issue_status_id'=>$issueStatus,
+                'return_status_id'=>$request->return_status_id,
+                'updated_by'=>Auth::id(),
+                'updated_at'=>now()
+            ]);
+        $existing = DB::table('comment')
+            ->where('comment_id', $targetCommentId)
+            ->select('role')
+            ->first();
+        $roleDone = $existing ? $existing->role : null;
+    } else {
+        return back()->with('error_message','Comment not found for this document');
+    }
+
+    // if an OWNER just marked a comment done, jump the backdoor stage directly
+    $docId = $request->document_id;
+    if ($roleDone === 'OWNER' && $request->status == 30) {
+        DB::table('document')->where('document_id', $docId)->update(['note_backdoor' => '5']);
+    }
+    // approver can choose next stage
+    if ($request->filled('next_stage')) {
+        switch ($request->next_stage) {
+            case 'rev-ifc':
+            case 'rev-ifa':
+            case 'rev-ifi':
+                // revision: map to Re- issue_status_id
+                $reMap = [
+                    'rev-ifc' => $issueStatus, // keep current for IFC
+                    'rev-ifa' => 8,             // Re-IFA
+                    'rev-ifi' => 14,            // Re-IFI
+                ];
+                $newIssueStatusId = $reMap[$request->next_stage] ?? $issueStatus;
+
+                DB::table('document')->where('document_id', $docId)->update([
+                    'note_backdoor'   => '2',
+                    'issue_status_id' => $newIssueStatusId,
+                ]);
+
+                // create outgoing transmittal draft for vendor revision
+                $incomingDetail = DB::table('incoming_transmittal_detail')
+                    ->where('document_id', $docId)
+                    ->orderBy('incoming_transmittal_detail_id', 'desc')
+                    ->first();
+
+                if ($incomingDetail) {
+                    $vendorId = DB::table('incoming_transmittal')
+                        ->where('incoming_transmittal_id', $incomingDetail->incoming_transmittal_id)
+                        ->value('vendor_id');
+
+                    $docInfo = DB::table('document')
+                        ->where('document_id', $docId)
+                        ->first();
+
+                    $outgoingId = DB::table('outgoing_transmittal')->insertGetId([
+                        'vendor_id'    => $vendorId,
+                        'project_id'   => $incomingDetail->project_id ?? 0,
+                        'outgoing_no'  => 'REV-' . date('YmdHis') . '-' . $docId,
+                        'subject'      => 'REVISION REQUEST - ' . ($docInfo->document_no ?? ''),
+                        'content'      => 'Please revise and re-upload document',
+                        'status_email' => 1,
+                        'created_by'   => Auth::id(),
+                        'created_at'   => now(),
+                    ]);
+
+                    DB::table('outgoing_transmittal_detail')->insert([
+                        'outgoing_transmittal_id'        => $outgoingId,
+                        'incoming_transmittal_detail_id' => $incomingDetail->incoming_transmittal_detail_id,
+                        'issue_status_id'                => $newIssueStatusId,
+                        'return_status_id'               => 0,
+                        'document_status_id'             => $docInfo->document_status_id ?? 0,
+                    ]);
+                }
+                break;
+
+            case 'accept-ifc':
+            case 'accept-ifa':
+            case 'accept-ifi':
+                // accept = DONE
+                DB::table('document')->where('document_id', $docId)->update(['note_backdoor' => '6']);
+                break;
+        }
+    }
+    // other roles handled elsewhere if needed
+
+    // Only re-run owner completion if approver did NOT choose a next stage
+    // (approver already set note_backdoor to 2 or 6 in the switch above)
+    if (!$request->filled('next_stage')) {
+        $this->checkOwnerCompletion($docId);
+    }
+
+    // clear session copy of options
+    session()->forget('nextStageOptions');
+
+    // send user back to the list so the document disappears immediately
+    return redirect()->route('comment_company.list')->with('success_message','Comment berhasil disimpan');
+}
+
+
+/**
+ * View attachment untuk company comment (sama dengan internal - buka PDF di PDA annotation)
+ */
+public function downloadAttachmentCompany($commentId)
+{
+    try {
+        $commentId = decodedData($commentId);
+        
+        // Query untuk mendapatkan document info (sama dengan internal)
+        $query = DB::select("SELECT  document.document_id, incoming_transmittal_detail.document_url, incoming_transmittal_detail.document_file, incoming_transmittal_detail.document_crs
+                              FROM    incoming_transmittal_detail INNER JOIN document ON incoming_transmittal_detail.document_id = document.document_id
+                              INNER   JOIN assignment ON incoming_transmittal_detail.incoming_transmittal_detail_id = assignment.incoming_transmittal_detail_id
+                              INNER   JOIN comment ON assignment.assignment_id = comment.assignment_id
+                              WHERE   document.status = 2 AND comment.status = 1 AND comment.comment_id = '$commentId'");
+
+        if (empty($query)) {
+            return back()->with('error_message', 'Attachment not found');
+        }
+
+        $row = $query[0];
+        
+        // Cek apakah ada document file
+        if (!empty($row->document_file)) {
+            $filePath = public_path('uploads') . $row->document_url . $row->document_file;
+            if (file_exists($filePath)) {
+                // Redirect ke PDF viewer / PDA annotation system
+                return redirect()->to('/uploads' . $row->document_url . $row->document_file);
+            }
+        }
+        
+        // Cek apakah ada CRS file
+        if (!empty($row->document_crs)) {
+            $filePath = public_path('uploads') . $row->document_url . $row->document_crs;
+            if (file_exists($filePath)) {
+                // Redirect ke PDF viewer / PDA annotation system
+                return redirect()->to('/uploads' . $row->document_url . $row->document_crs);
+            }
+        }
+        
+        return back()->with('error_message', 'Attachment file not found');
+        
+    } catch (\Exception $e) {
+        return back()->with('error_message', 'Error viewing attachment: ' . $e->getMessage());
+    }
+}
+
+/**
+ * View document by document ID (untuk tombol di form utama)
+ */
+public function viewDocumentAttachment($documentId)
+{
+    try {
+        $documentId = decodedData($documentId);
+        
+        // Query untuk mendapatkan document info by document ID
+        $query = DB::select("SELECT  document.document_id, incoming_transmittal_detail.document_url, incoming_transmittal_detail.document_file, incoming_transmittal_detail.document_crs
+                              FROM    incoming_transmittal_detail INNER JOIN document ON incoming_transmittal_detail.document_id = document.document_id
+                              WHERE   document.document_id = '$documentId'");
+
+        if (empty($query)) {
+            return back()->with('error_message', 'Document not found');
+        }
+
+        $row = $query[0];
+        
+        // Cek apakah ada document file
+        if (!empty($row->document_file)) {
+            $filePath = public_path('uploads') . $row->document_url . $row->document_file;
+            if (file_exists($filePath)) {
+                // Redirect ke PDF viewer / PDA annotation system
+                return redirect()->to('/uploads' . $row->document_url . $row->document_file);
+            }
+        }
+        
+        // Cek apakah ada CRS file
+        if (!empty($row->document_crs)) {
+            $filePath = public_path('uploads') . $row->document_url . $row->document_crs;
+            if (file_exists($filePath)) {
+                // Redirect ke PDF viewer / PDA annotation system
+                return redirect()->to('/uploads' . $row->document_url . $row->document_crs);
+            }
+        }
+        
+        return back()->with('error_message', 'Document file not found');
+        
+    } catch (\Exception $e) {
+        return back()->with('error_message', 'Error viewing document: ' . $e->getMessage());
+    }
+}
+
+/**
+ * IDC External - Halaman untuk external users melakukan review dan approval
+ */
+public function idcExternal($documentId)
+{
+    try {
+        $documentId = base64_decode($documentId);
+        
+        // Get document info
+        $document = DB::table('document AS d')
+            ->leftJoin('incoming_transmittal_detail AS itd', 'd.document_id', '=', 'itd.document_id')
+            ->leftJoin('ref_issue_status AS ris', 'd.issue_status_id', '=', 'ris.issue_status_id')
+            ->leftJoin('ref_document_status AS rds', 'd.document_status_id', '=', 'rds.document_status_id')
+            ->where('d.document_id', $documentId)
+            ->first();
+            
+        if (!$document) {
+            return back()->with('error_message', 'Document not found');
+        }
+        
+        // Get assignments untuk document ini
+        $assignments = DB::table('assignment AS a')
+            ->join('comment AS c', 'a.assignment_id', '=', 'c.assignment_id')
+            ->join('users AS u', 'c.user_id', '=', 'u.id')
+            ->leftJoin('ref_document_status AS rds', 'c.issue_status_id', '=', 'rds.document_status_id')
+            ->where('a.document_id', $documentId)
+            ->whereIn('c.role', ['RESPONSIBLE', 'OWNER', 'APPROVER_COMPANY'])
+            ->where('c.status_nonaktif', 0)
+            ->select(
+                'a.*',
+                'c.*',
+                'u.name AS full_name',
+                'u.email',
+                'rds.name as revision_status_name',
+                DB::raw("CASE 
+                    WHEN c.status = 10 THEN 'Assigned'
+                    WHEN c.status = 20 THEN 'In Progress' 
+                    WHEN c.status = 30 THEN 'Done'
+                    ELSE 'Unknown'
+                END as status_text")
+            )
+            ->orderByRaw("FIELD(c.role, 'RESPONSIBLE', 'OWNER', 'APPROVER_COMPANY')")
+            ->get();
+        
+        // Check workflow status
+        $responsibleCompleted = $assignments->filter(function ($assignment) {
+            return $assignment->role == 'RESPONSIBLE' && $assignment->status == 30;
+        })->count();
+        
+        $totalResponsible = $assignments->filter(function ($assignment) {
+            return $assignment->role == 'RESPONSIBLE';
+        })->count();
+        
+        $ownerCompleted = $assignments->filter(function ($assignment) {
+            return $assignment->role == 'OWNER' && $assignment->status == 30;
+        })->count();
+        
+        $totalOwner = $assignments->filter(function ($assignment) {
+            return $assignment->role == 'OWNER';
+        })->count();
+        
+        $approverCompleted = $assignments->filter(function ($assignment) {
+            return $assignment->role == 'APPROVER_COMPANY' && $assignment->status == 30;
+        })->count();
+        
+        $totalApprover = $assignments->filter(function ($assignment) {
+            return $assignment->role == 'APPROVER_COMPANY';
+        })->count();
+        
+        // Determine workflow status dan user permission
+        $allResponsibleCompleted = ($responsibleCompleted >= $totalResponsible) && $totalResponsible > 0;
+        $allOwnerCompleted = ($ownerCompleted >= $totalOwner) && $totalOwner > 0;
+        $allApproverCompleted = ($approverCompleted >= $totalApprover) && $totalApprover > 0;
+        
+        // Determine current user role dan permission
+        $currentUserAssignment = $assignments->filter(function ($assignment) {
+            return $assignment->user_id == Auth::id();
+        })->first();
+        
+        $canApprove = false;
+        $workflowStatus = '';
+        
+        if (!$allResponsibleCompleted) {
+            $workflowStatus = 'Menunggu komentar dari RESPONSIBLE users';
+            $canApprove = false;
+        } elseif (!$allOwnerCompleted) {
+            $workflowStatus = 'Menunggu approval dari OWNER';
+            $canApprove = $currentUserAssignment && $currentUserAssignment->role == 'OWNER';
+        } elseif (!$allApproverCompleted) {
+            $workflowStatus = 'Siap untuk approval COMPANY APPROVER';
+            $canApprove = $currentUserAssignment && $currentUserAssignment->role == 'APPROVER_COMPANY';
+        } else {
+            $workflowStatus = 'Semua approval selesai';
+            $canApprove = false;
+        }
+        
+        $data = [
+            'title' => 'IDC External - ' . $document->document_no,
+            'document' => $document,
+            'assignments' => $assignments,
+            'workflowStatus' => $workflowStatus,
+            'canApprove' => $canApprove,
+            'currentUserAssignment' => $currentUserAssignment,
+            'allResponsibleCompleted' => $allResponsibleCompleted,
+            'allOwnerCompleted' => $allOwnerCompleted,
+            'allApproverCompleted' => $allApproverCompleted,
+            'revisionOptions' => [
+                ['id' => 'A0', 'name' => 'A0'],
+                ['id' => 'A1', 'name' => 'A1'],
+                ['id' => 'A2', 'name' => 'A2'],
+                ['id' => 'RE-IFC', 'name' => 'RE-IFC'],
+                ['id' => 'RE-IFA', 'name' => 'RE-IFA'],
+                ['id' => 'RE-IFI', 'name' => 'RE-IFI'],
+                ['id' => 'RE-IFR', 'name' => 'RE-IFR'],
+            ]
+        ];
+        
+        return view('incoming.idc_external', $data);
+        
+    } catch (\Exception $e) {
+        return back()->with('error_message', 'Error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Save IDC External approval/rejection
+ */
+public function saveIdcExternal(Request $request, $documentId)
+{
+    try {
+        $documentId = base64_decode($documentId);
+        
+        $request->validate([
+            'action' => 'required|in:approve,reject',
+            'remark' => 'required|string',
+            'revision_status' => 'nullable|integer'
+        ]);
+        
+        // Get current document
+        $document = DB::table('document')->where('document_id', $documentId)->first();
+        if (!$document) {
+            return back()->with('error_message', 'Document not found');
+        }
+        
+        // Get current user assignment untuk menentukan role
+        $currentUserAssignment = DB::table('assignment AS a')
+            ->join('comment AS c', 'a.assignment_id', '=', 'c.assignment_id')
+            ->where('a.document_id', $documentId)
+            ->where('c.user_id', Auth::id())
+            ->where('c.status_nonaktif', 0)
+            ->select('c.role')
+            ->first();
+        
+        $userRole = $currentUserAssignment ? $currentUserAssignment->role : '';
+        
+        // Update document status based on action
+        if ($request->action == 'approve') {
+            // determine next backdoor stage based on current value and role
+            $currentBackdoor = $document->note_backdoor;
+            $nextBackdoor = $currentBackdoor;
+
+            if (empty($currentBackdoor)) {
+                // first approval from IDC external
+                $nextBackdoor = '3';
+            } elseif ($currentBackdoor == '3') {
+                // after responsible comments finished move to owner
+                $unfinished = DB::table('comment AS c')
+                    ->join('assignment AS a', 'c.assignment_id', '=', 'a.assignment_id')
+                    ->where('a.document_id', $documentId)
+                    ->where('c.role', 'RESPONSIBLE')
+                    ->whereNull('c.remark')
+                    ->count();
+                if ($unfinished == 0) {
+                    $nextBackdoor = '4';
+                }
+            } elseif ($currentBackdoor == '4' && $userRole == 'OWNER') {
+                $nextBackdoor = '5';
+            } elseif ($currentBackdoor == '5' && $userRole == 'APPROVER_COMPANY') {
+                $nextBackdoor = '6';
+            }
+
+            // Check if document needs revision (RE- status) or can be DONE
+            if ($request->revision_status) {
+                // approver selected a revision/issue status – return to internal workflow
+                $nextBackdoor = '2';
+
+                // compute new document status based on selected revision value (A0, A1, RE-IFC, etc.)
+                $newStatusId = $this->getDocumentStatusId($request->revision_status, $document->issue_status_id);
+
+                // optional: if the revision corresponds to a different issue status, update it as well
+                $newIssueStatusId = $document->issue_status_id;
+                if (preg_match('/^RE\-/', $request->revision_status)) {
+                    $newIssueStatusId = $document->issue_status_id;
+                }
+
+                // reset assignment comments to start fresh under internal cycle
+                DB::table('comment AS c')
+                    ->join('assignment AS a', 'c.assignment_id', '=', 'a.assignment_id')
+                    ->where('a.document_id', $documentId)
+                    ->whereIn('c.role', ['RESPONSIBLE', 'OWNER', 'APPROVER_COMPANY'])
+                    ->update([
+                        'c.status' => 10,
+                        'c.remark' => null,
+                        'c.updated_at' => now()
+                    ]);
+            } else {
+                // if we moved to stage 6 treat as done status
+                if ($nextBackdoor === '6') {
+                    $newStatusId = 6; // DONE
+                } else {
+                    // keep existing status unchanged for intermediate stages
+                    $newStatusId = $document->status;
+                }
+                $newIssueStatusId = $document->issue_status_id;
+            }
+            
+            // Update document
+            $updateData = [
+                'status' => $newStatusId,
+                'document_status_id' => $newStatusId,
+                'revision_status' => $request->revision_status ?? $document->revision_status,
+                'note_backdoor' => $nextBackdoor,
+            ];
+            if (isset($newIssueStatusId)) {
+                $updateData['issue_status_id'] = $newIssueStatusId;
+            }
+            DB::table('document')
+                ->where('document_id', $documentId)
+                ->update($updateData);
+                
+            // Log the approval
+            DB::table('document_log')->insert([
+                'document_id' => $documentId,
+                'user_id' => Auth::id(),
+                'action' => 'IDC_EXTERNAL_APPROVE',
+                'remark' => $request->remark,
+                'created_at' => now()
+            ]);
+            
+            return back()->with('success_message', 'Document approved successfully!');
+            
+        } else {
+            // REJECT - Different workflow based on user role
+            if ($userRole == '') {
+                // Jika reject di tahap awal IDC (belum ada role) → kembali ke Assignment External
+                $newStatusId = 2; // Assigned (kembali ke assignment)
+                $message = 'Document rejected! Kembali ke Assignment External.';
+                $action = 'IDC_EXTERNAL_REJECT_TO_ASSIGNMENT';
+                
+            } elseif (in_array($userRole, ['OWNER', 'APPROVER_COMPANY'])) {
+                // Jika reject di OWNER/APPROVER COMPANY → revisi ulang ke Internal Flow
+                $newStatusId = 2; // Assigned (kembali ke internal)
+                $newIssueStatusId = 0; // Reset ke internal flow
+                
+                // Reset all assignments ke internal flow
+                DB::table('comment AS c')
+                    ->join('assignment AS a', 'c.assignment_id', '=', 'a.assignment_id')
+                    ->where('a.document_id', $documentId)
+                    ->whereIn('c.role', ['RESPONSIBLE', 'OWNER', 'APPROVER_COMPANY'])
+                    ->update([
+                        'c.status' => 10, // Reset to Assigned
+                        'c.remark' => null,
+                        'c.updated_at' => now()
+                    ]);
+                
+                $message = 'Document rejected! Kembali ke Internal Flow untuk revisi ulang.';
+                $action = 'IDC_EXTERNAL_REJECT_TO_INTERNAL';
+                
+            } else {
+                // Default untuk RESPONSIBLE atau role lainnya
+                $newStatusId = 2; // Assigned
+                $message = 'Document rejected! Kembali ke Assignment External.';
+                $action = 'IDC_EXTERNAL_REJECT';
+            }
+            
+            // Update document
+            DB::table('document')
+                ->where('document_id', $documentId)
+                ->update([
+                    'status' => $newStatusId,
+                    'issue_status_id' => $newIssueStatusId ?? $document->issue_status_id,
+                    'updated_at' => now()
+                ]);
+                
+            // Log the rejection
+            DB::table('document_log')->insert([
+                'document_id' => $documentId,
+                'user_id' => Auth::id(),
+                'action' => $action,
+                'remark' => $request->remark,
+                'created_at' => now()
+            ]);
+            
+            return back()->with('success_message', $message);
+        }
+        
+    } catch (\Exception $e) {
+        return back()->with('error_message', 'Error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Quick approve handler for IDC external pending document.
+ * Marks note_backdoor=6 so it leaves the IDC external list.
+ */
+public function approveIdcExternal($documentId)
+{
+    try {
+        $documentId = base64_decode($documentId);
+        // determine current note_backdoor and advance one step
+        $doc = DB::table('document')->where('document_id', $documentId)->first();
+        $next = $doc->note_backdoor;
+        if (empty($next)) {
+            $next = '3';          // first approval
+        } elseif ($next === '3') {
+            $next = '4';          // to owner
+        } elseif ($next === '4') {
+            $next = '5';          // to approver
+        } elseif ($next === '5') {
+            $next = '6';          // done
+        }
+        DB::table('document')
+            ->where('document_id', $documentId)
+            ->update(['note_backdoor' => $next]);
+        return redirect()->route('incoming_company.idc_external.list')
+            ->with('success_message', 'Document approved successfully!');
+    } catch (\Exception $e) {
+        $this->logModel->createError($e->getMessage(), "QUICK IDC APPROVE FAILED", "");
+        return redirect()->route('incoming_company.idc_external.list')
+            ->with('error_message', 'Error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Incoming Company List - Menampilkan data seperti document list
+ */
+public function incomingCompanyList(Request $request)
+{
+    try {
+        $data["title"] = "Incoming Company";
+        $data["parent"] = "Transmittal";
+        $data["form_act"] = "/incoming_company/incoming-company-list";
+        $data["active_page"] = 1;
+        $data["offset"] = 0;
+        
+        // Get documents dari incoming_transmittal_detail dengan issue_status_id 1,3,5,7
+        $q = DB::table('document AS d')
+            ->join('incoming_transmittal_detail AS itd', 'd.document_id', '=', 'itd.document_id')
+            ->join('incoming_transmittal AS it', 'itd.incoming_transmittal_id', '=', 'it.incoming_transmittal_id')
+            ->leftJoin('ref_vendor AS rv', 'd.vendor_id', '=', 'rv.vendor_id')
+            ->leftJoin('ref_document_status AS rds', 'd.document_status_id', '=', 'rds.document_status_id')
+            ->leftJoin('ref_issue_status AS ris', 'd.issue_status_id', '=', 'ris.issue_status_id')
+            ->whereIn('itd.issue_status_id', [1, 3, 5, 7])
+            ->whereNotIn('d.status', [0, 88])
+            ->select(
+                'd.document_id',
+                'd.document_no', 
+                'd.document_title',
+                'd.deadline',
+                DB::raw("DATE_FORMAT(d.deadline, '%d-%m-%Y') AS deadline"),
+                'rv.name AS vendor_name',
+                'ris.name AS issue_status_name',
+                'd.issue_status_id',
+                'rds.name AS document_status',
+                DB::raw("(CASE d.status WHEN 1 THEN 'Unissued' WHEN 2 THEN 'Waiting for reviewer' WHEN 3 THEN 'Waiting for compiler' WHEN 4 THEN 'Waiting for return' WHEN 5 THEN 'Waiting for approval' WHEN 7 THEN 'Waiting for view' WHEN 99 THEN 'Stored' WHEN 88 THEN 'Reject' WHEN 6 THEN 'Done' END) AS status_code")
+            )
+            ->orderBy('d.document_id', 'DESC')
+            ->groupBy(
+                'd.document_id',
+                'd.document_no',
+                'd.document_title',
+                'deadline',
+                'vendor_name',
+                'issue_status_name',
+                'd.issue_status_id',
+                'document_status',
+                'd.status'
+            );
+        
+        // Handle search
+        if($request->has('search') && $request->search != '') {
+            $search = $request->search;
+            $q->where(function($query) use ($search) {
+                $query->where('d.document_no', 'like', "%{$search}%")
+                      ->orWhere('d.document_title', 'like', "%{$search}%")
+                      ->orWhere('rv.name', 'like', "%{$search}%");
+            });
+        }
+        
+        $data["documents"] = $q->paginate(10);
+        
+        return view('incoming.incoming_company_list', $data);
+        
+    } catch (\Exception $e) {
+        return back()->with('error_message', 'Error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Get revision options based on issue status
+ */
+private function getRevisionOptions($issueStatusId)
+{
+    $revisions = DB::table('ref_document_status')
+        ->select('document_status_id as id', 'name')
+        ->where('status', 1)
+        ->where(function ($q) use ($issueStatusId) {
+            $q->where('issue_status_id', 0)
+              ->orWhere('issue_status_id', $issueStatusId);
+        })
+        ->orderByRaw('
+            CASE 
+                WHEN name REGEXP "^[0-9]+$" THEN CAST(name AS UNSIGNED) 
+                ELSE 9999 
+            END ASC, name ASC
+        ')
+        ->get();
+        
+    return $revisions->toArray();
+}
+
+/**
+ * Get document status ID by name and issue status
+ */
+private function getDocumentStatusId($statusName, $issueStatusId)
+{
+    $status = DB::table('ref_document_status')
+        ->where('name', $statusName)
+        ->where('status', 1)
+        ->where(function ($q) use ($issueStatusId) {
+            $q->where('issue_status_id', 0)
+              ->orWhere('issue_status_id', $issueStatusId);
+        })
+        ->first();
+        
+    return $status ? $status->document_status_id : 6; // Default to DONE if not found
+}
+
+/**
+ * IDC External List - Daftar dokumen yang perlu direview oleh external users
+ */
+public function idcExternalList(Request $request)
+{
+    try {
+        $data["title"] = "IDC External";
+        $data["parent"] = "Transmittal";
+        $data["form_act"] = "/incoming_company/idc-external-list";
+        $data["active_page"] = 1;
+        $data["offset"] = 0;
+        
+        // Get documents yang sudah di-assign dan perlu external approval
+        $q = DB::table('document AS d')
+            ->leftJoin('incoming_transmittal_detail AS itd', 'd.document_id', '=', 'itd.document_id')
+            ->leftJoin('incoming_transmittal AS it', 'itd.incoming_transmittal_id', '=', 'it.incoming_transmittal_id')
+            ->leftJoin('ref_issue_status AS ris', 'd.issue_status_id', '=', 'ris.issue_status_id')
+            ->leftJoin('ref_document_status AS rds', 'd.document_status_id', '=', 'rds.document_status_id')
+            ->leftJoin('assignment AS a', 'd.document_id', '=', 'a.document_id')
+            ->leftJoin('comment AS c', 'a.assignment_id', '=', 'c.assignment_id')
+            ->leftJoin('users AS u', 'c.user_id', '=', 'u.id')
+            // pending documents have empty/null backdoor flag
+            ->where(function($q2) {
+                $q2->whereNull('d.note_backdoor')->orWhere('d.note_backdoor', '');
+            })
+            // only show external statuses (same set used by incomingCompanyIndex)
+            ->whereIn('d.issue_status_id', [STATUS_IFC, STATUS_IFA, STATUS_IFI])
+            ->select(
+                'd.document_id',
+                'd.document_no',
+                'd.document_title',
+                DB::raw('MAX(d.issue_status_id) AS issue_status_id'),
+                DB::raw('MAX(d.document_status_id) AS document_status_id'),
+                DB::raw('MAX(d.status) AS status'),
+                DB::raw('MAX(d.created_at) AS created_at'),
+                'd.note_backdoor',
+                'ris.name as issue_status_name',
+                'rds.name as document_status_name',
+                DB::raw('MAX(it.incoming_no) AS incoming_no'),
+                DB::raw('MAX(it.receive_date) AS rec_date'),
+                DB::raw("GROUP_CONCAT(DISTINCT CONCAT(c.role, ':', u.name) ORDER BY c.role) as assigned_users"),
+                DB::raw("COUNT(CASE WHEN c.role = 'RESPONSIBLE' AND c.status = 30 THEN 1 END) as responsible_completed"),
+                DB::raw("COUNT(CASE WHEN c.role = 'RESPONSIBLE' THEN 1 END) as total_responsible"),
+                DB::raw("COUNT(CASE WHEN c.role = 'OWNER' AND c.status = 30 THEN 1 END) as owner_completed"),
+                DB::raw("COUNT(CASE WHEN c.role = 'OWNER' THEN 1 END) as total_owner"),
+                DB::raw("COUNT(CASE WHEN c.role = 'APPROVER_COMPANY' AND c.status = 30 THEN 1 END) as approver_completed"),
+                DB::raw("COUNT(CASE WHEN c.role = 'APPROVER_COMPANY' THEN 1 END) as total_approver")
+            )
+            ->groupBy('d.document_id', 'd.document_no', 'd.document_title', 'd.note_backdoor', 'ris.name', 'rds.name')
+            ->orderBy('d.created_at', 'desc');
+        
+        // Apply filters if exists
+        if ($request->filled('document_no')) {
+            $q->where('d.document_no', 'like', '%' . $request->document_no . '%');
+        }
+        
+        if ($request->filled('issue_status_id')) {
+            $q->where('d.issue_status_id', $request->issue_status_id);
+        }
+        
+        // Get data
+        $documents = $q->paginate(Auth::user()->perpage ?? 10);
+        
+        // Process documents to add workflow status
+        $documents->getCollection()->transform(function ($doc) {
+            // Check workflow status
+            $doc->all_responsible_completed = ($doc->responsible_completed >= $doc->total_responsible) && $doc->total_responsible > 0;
+            $doc->all_owner_completed = ($doc->owner_completed >= $doc->total_owner) && $doc->total_owner > 0;
+            $doc->all_approver_completed = ($doc->approver_completed >= $doc->total_approver) && $doc->total_approver > 0;
+            
+            // Determine workflow status
+            if (!$doc->all_responsible_completed) {
+                $doc->workflow_status = '<span class="label label-warning">Waiting for Responsible Comments</span>';
+                $doc->can_approve = false;
+            } elseif (!$doc->all_owner_completed) {
+                $doc->workflow_status = '<span class="label label-info">Waiting for Owner Approval</span>';
+                $doc->can_approve = false;
+            } elseif (!$doc->all_approver_completed) {
+                $doc->workflow_status = '<span class="label label-primary">Ready for Company Approval</span>';
+                $doc->can_approve = true;
+            } else {
+                $doc->workflow_status = '<span class="label label-success">All Approvals Complete</span>';
+                $doc->can_approve = false;
+            }
+            
+            return $doc;
+        });
+        
+        $data["documents"] = $documents;
+        
+        // Get filters
+        $data["issue_status_options"] = DB::table('ref_issue_status')
+            ->whereIn('issue_status_id', [1, 3, 7, 5]) // IFC=1, IFA=3, IFI=7, IFR=5
+            ->where('status', 1)
+            ->pluck('name', 'issue_status_id');
+        
+        return view('incoming.idc_external_list', $data);
+        
+    } catch (\Exception $e) {
+        // log error and show page with message rather than redirect back (which sends user elsewhere)
+        $this->logModel->createError($e->getMessage(), "IDC EXTERNAL LIST ERROR", "");
+        // ensure we still have filter options
+        $data["documents"] = collect();
+        $data["issue_status_options"] = DB::table('ref_issue_status')
+            ->whereIn('issue_status_id', [1, 3, 7, 5])
+            ->where('status', 1)
+            ->pluck('name', 'issue_status_id');
+        $data['error_message'] = 'Error: ' . $e->getMessage();
+        return view('incoming.idc_external_list', $data);
+    }
+}
+
+/**
+ * Get workflow status text
+ */
+private function getWorkflowStatus($document)
+{
+    if ($document->all_responsible_completed) {
+        return '<span class="label label-success">Ready for Approval</span>';
+    } else {
+        return '<span class="label label-warning">Waiting for Comments</span>';
+    }
+}
+
+/*===================================*/
+
+public function add($id = null)
+{
+    if($id){
+        $id = decodedData($id);
+    
+        $header = DB::table('incoming_transmittal')
+            ->where('incoming_transmittal_id',$id)
+            ->first();
+    }
+    try {
+        $data["title"]         = ($this->isVendor == "YES") ? "Add Outgoing Transmittal" : "Add Incoming Transmittal";
+        $data["parent"]        = ucwords(strtolower($this->PROT_Parent));
+        //$data["form_act"]      = ($this->isVendor == "YES") ? "/vendor_outgoing/save" : "/incoming/save";
         
         if($id){
-            $id = decodedData($id);
-        
-            $header = DB::table('incoming_transmittal')
-                ->where('incoming_transmittal_id',$id)
-                ->first();
+            $data["form_act"] = ($this->isVendor == "YES")
+                ? "/vendor_outgoing/update"
+                : "/incoming/update";
+        }else{
+            $data["form_act"] = ($this->isVendor == "YES")
+                ? "/vendor_outgoing/save"
+                : "/incoming/save";
         }
-        try {
-            $data["title"]         = ($this->isVendor == "YES") ? "Add Outgoing Transmittal" : "Add Incoming Transmittal";
-            $data["parent"]        = ucwords(strtolower($this->PROT_Parent));
-            //$data["form_act"]      = ($this->isVendor == "YES") ? "/vendor_outgoing/save" : "/incoming/save";
-            
-            if($id){
-                $data["form_act"] = ($this->isVendor == "YES")
-                    ? "/vendor_outgoing/update"
-                    : "/incoming/update";
-            }else{
-                $data["form_act"] = ($this->isVendor == "YES")
-                    ? "/vendor_outgoing/save"
-                    : "/incoming/save";
+                        
+        /* ----------
+         Model
+        ----------------------- */
+        $selectDocument           = $this->qReference->getSelectDocumentVendor(Auth::user()->vendor_id);
+        $selectIssueStatus        = $this->qReference->getSelectIssueStatusWithoutIFI();
+        $selectIssueStatusIFI     = $this->qReference->getSelectIssueStatusIFI();
+        $selectReturnStatus       = $this->qReference->getSelectReturnStatus();
+        $selectIssueStatusIFIContruction    = $this->qReference->getSelectIssueStatusIFIContruction();
+        $selectVendor             = $this->qReference->getSelectVendor();
+        $selectProject            = $this->qReference->getSelectProject();
+        $selectVendorUser         = $this->qReference->getSelectVendorUser(Auth::user()->vendor_id);
+        $selectProjectUser        = $this->qReference->getSelectProjectUser(Auth::user()->vendor_id);
+        //$selectDocumentStatus     = [];
+        //$selectDocumentStatus = $this->qReference->getSelectDocumentStatus();
+        
+        $selectDocumentStatus = $this->qReference->getSelectDocumentStatusInternal();
+        
+        $selectDocumentStatusIFI  = array(array("id"=>120, "name"=>"0A"));
+        // $selectDocumentStatus  = $this->qReference->getSelectDocumentStatus();
+        # ---------------
+        $data["items"]            = $this->qIncoming->getItemTemp();
+        // $this->qIncoming->emptyTemp();
+        /* ----------
+         Fields
+        ----------------------- */
+        $data["fields"][]      = form_hidden(array("name"=>"vendor_id", "label"=>"Vendor", "mandatory"=>"yes", "value"=>Auth::user()->vendor_id));
+        //$data["fields"][]      = form_text(array("name"=>"incoming_no", "label"=>($this->isVendor == "YES") ? "Outgoing Number" : "Incoming Number", "mandatory"=>"yes", "first_selected"=>"yes"));
+           
+        $data["fields"][] = form_text([
+        "name"=>"incoming_no",
+        "label"=>"Outgoing Number",
+        "mandatory"=>"yes",
+        "first_selected"=>"yes",
+        "value"=> isset($header->incoming_no) ? $header->incoming_no : ""
+        ]);        
+           
+           
+        $data["fields"][]      = form_hidden(array("name"=>"receive_date", "label"=>($this->isVendor == "YES") ? "Sending Date" : "Receive Date", "mandatory"=>"yes", "value"=>date("d/m/Y")));
+        $data["fields"][]      = form_hidden(array("name"=>"sender_date", "label"=>"Sender Date", "mandatory"=>"yes", "value"=>date("d/m/Y")));
+        //$data["fields"][]      = form_text(array("name"=>"subject", "label"=>"Subject", "mandatory"=>"yes", "value"=>""));
+        
+        $data["fields"][] = form_text(array(
+        "name"=>"subject",
+        "label"=>"Subject",
+        "mandatory"=>"yes",
+        "value"=> isset($header->subject) ? $header->subject : ""
+        ));
+                        
+        $data["fields"][]      = form_hidden(array("name"=>"return_date_plan", "label"=>"Return Plan Date", "value"=>date("d/m/Y")));
+        $data["fields"][]      = form_hidden(array("name"=>"return_date_actual", "label"=>"Return Plan Actual", "value"=>date("d/m/Y")));  
+        $data["fields"][]      = form_text(array("name"=>"description", "label"=>"Remark"));          
+        $data["fields"][]      = form_upload(array("name"=>"receipt", "label"=>"Receipt"));
+        
+        
+        
+        $data["fields"][] = form_hidden(array(
+        "name"=>"incoming_transmittal_id",
+        "value"=> isset($header->incoming_transmittal_id) ? $header->incoming_transmittal_id : ""
+        ));
+        
+        
+        /* ----------
+         Modal Fields
+        ----------------------- */
+        $data["fields_modal"][]= form_upload(array("name"=>"document_file", "label"=>"Document File"));
+        $data["fields_modal"][]= form_upload(array("name"=>"document_crs", "label"=>"CRS File"));
+        $data["fields_modal"][]= form_select(array("name"=>"document_id", "label"=>"Document Number", "source"=>$selectDocument));
+        $data["fields_modal"][]= form_select(array("name"=>"issue_status_id", "label"=>"Issue Status", "withnull"=>"yes", "source"=>$selectIssueStatus, "value"=>0));
+        $data["fields_modal"][]= form_select(array("name"=>"document_status_id", "label"=>"Revision Number", "withnull"=>"yes", "source"=>$selectDocumentStatus));
+        $data["fields_modal"][]= form_hidden(array("name"=>"return_status_id", "label"=>"Return Status", "withnull"=>"yes", "source"=>$selectReturnStatus));
+        $data["fields_modal"][]= form_text(array("name"=>"remark", "label"=>"Description"));
+        /* ----------
+         Modal Fields
+        ----------------------- */
+        $data["fields_modal_ifi"][]= form_hidden(array("name"=>"project_id", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
+        $data["fields_modal_ifi"][]= form_select(array("name"=>"project_id_ifi", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
+        $data["fields_modal_ifi"][]= form_select(array("name"=>"vendor_id_ifi", "label"=>"Vendor", "source"=>$selectVendorUser, "readonly"=>"readonly"));
+        $data["fields_modal_ifi"][]= form_upload(array("name"=>"document_file_ifi", "label"=>"Document IFI"));
+        $data["fields_modal_ifi"][]= form_text(array("name"=>"document_no_ifi", "label"=>"Document Number"));
+        $data["fields_modal_ifi"][]= form_text(array("name"=>"document_name_ifi", "label"=>"Document Name"));
+        $data["fields_modal_ifi"][]= form_select(array("name"=>"issue_status_id_ifi", "label"=>"Issue Status", "source"=>$selectIssueStatusIFI, "value"=>STATUS_ONLY_IFI));
+        $data["fields_modal_ifi"][]= form_select(array("name"=>"document_status_id_ifi", "label"=>"Revision Number", "source"=>$selectDocumentStatusIFI, "value"=>120));
+        $data["fields_modal_ifi"][]= form_hidden(array("name"=>"return_status_id_ifi", "label"=>"Return Status", "withnull"=>"yes", "source"=>$selectReturnStatus));
+        $data["fields_modal_ifi"][]= form_text(array("name"=>"remark_ifi", "label"=>"Description"));
+        /* ----------
+         Modal Fields
+        ----------------------- */
+        $data["fields_modal_ifi_contruction"][]= form_hidden(array("name"=>"project_id", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
+        $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"project_id_ifi_contruction", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
+        $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"vendor_id_ifi_contruction", "label"=>"Vendor", "source"=>$selectVendorUser, "readonly"=>"readonly"));
+        $data["fields_modal_ifi_contruction"][]= form_upload(array("name"=>"document_file_ifi_contruction", "label"=>"Document IFC"));
+        $data["fields_modal_ifi_contruction"][]= form_text(array("name"=>"document_no_ifi_contruction", "label"=>"Document Number"));
+        $data["fields_modal_ifi_contruction"][]= form_text(array("name"=>"document_name_ifi_contruction", "label"=>"Document Name"));
+        $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"issue_status_id_ifi_contruction", "label"=>"Issue Status", "source"=>$selectIssueStatusIFIContruction, "value"=>STATUS_ONLY_IFI_CONSTRUCTION));
+        $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"document_status_id_ifi_contruction", "label"=>"Revision Number", "source"=>$selectDocumentStatusIFI, "value"=>120));
+        $data["fields_modal_ifi_contruction"][]= form_hidden(array("name"=>"return_status_id_ifi_contruction", "label"=>"Return Status", "withnull"=>"yes", "source"=>$selectReturnStatus));
+        $data["fields_modal_ifi_contruction"][]= form_text(array("name"=>"remark_ifi_contruction", "label"=>"Description"));
+        # ---------------
+        $data["buttons"][]     = form_button_submit(array("name"=>"button_save", "label"=>"&nbsp;&nbsp;Save&nbsp;&nbsp;"));
+        $data["buttons"][]     = form_button_cancel(array("name"=>"button_cancel", "label"=>"Cancel"));
+        # ---------------
+        $data["attach_url"]    = "/incoming/attach_item";
+        $data["delete_url"]    = "/incoming/delete_item";
+        # ---------------
+        return view("incoming.form-add-with-ifi-contruction", $data);
+    } catch (\Exception $e) {
+        $this->logModel->createError($e->getMessage(), "PAGE USER", "");
+        throw $e;
+        # ---------------
+        return view("error.405");
+    }        
+}
+
+public function attach_item(Request $request) {
+    try {
+        $dataConfig     = $this->sysModel->getConfig();
+        $extention      = $dataConfig->attachment_extention;
+        $max_size       = $dataConfig->attachment_max_size;
+        if($max_size > 0) {
+            if(!empty($extention)) {
+                $validate_message   = "Attachment extention must $extention & maximum size " . number_format($max_size, 0) . " kb"; 
+                $rules              = array(
+                    "document_file" => "required|mimes:$extention|max:$max_size",
+                    // "document_crs" => "required|mimes:$extention|max:$max_size"
+                );
+            } else {
+                $validate_message   = "Attachment maximum size " . number_format($max_size, 0) . " kb";
+                $rules = array(
+                    "document_file" => "required|max:$max_size",
+                    // "document_crs" => "required|max:$max_size"
+                );
             }
-                        
-            /* ----------
-             Model
-            ----------------------- */
-            $selectDocument           = $this->qReference->getSelectDocumentVendor(Auth::user()->vendor_id);
-            $selectIssueStatus        = $this->qReference->getSelectIssueStatusWithoutIFI();
-            $selectIssueStatusIFI     = $this->qReference->getSelectIssueStatusIFI();
-            $selectReturnStatus       = $this->qReference->getSelectReturnStatus();
-            $selectIssueStatusIFIContruction    = $this->qReference->getSelectIssueStatusIFIContruction();
-            $selectVendor             = $this->qReference->getSelectVendor();
-            $selectProject            = $this->qReference->getSelectProject();
-            $selectVendorUser         = $this->qReference->getSelectVendorUser(Auth::user()->vendor_id);
-            $selectProjectUser        = $this->qReference->getSelectProjectUser(Auth::user()->vendor_id);
-            //$selectDocumentStatus     = [];
-            //$selectDocumentStatus = $this->qReference->getSelectDocumentStatus();
-            
-            $selectDocumentStatus = $this->qReference->getSelectDocumentStatusInternal();
-            
-            $selectDocumentStatusIFI  = array(array("id"=>120, "name"=>"0A"));
-            // $selectDocumentStatus  = $this->qReference->getSelectDocumentStatus();
-            # ---------------
-            $data["items"]            = $this->qIncoming->getItemTemp();
-            // $this->qIncoming->emptyTemp();
-            /* ----------
-             Fields
-            ----------------------- */
-            $data["fields"][]      = form_hidden(array("name"=>"vendor_id", "label"=>"Vendor", "mandatory"=>"yes", "value"=>Auth::user()->vendor_id));
-            //$data["fields"][]      = form_text(array("name"=>"incoming_no", "label"=>($this->isVendor == "YES") ? "Outgoing Number" : "Incoming Number", "mandatory"=>"yes", "first_selected"=>"yes"));
-           
-            $data["fields"][] = form_text([
-            "name"=>"incoming_no",
-            "label"=>"Outgoing Number",
-            "mandatory"=>"yes",
-            "first_selected"=>"yes",
-            "value"=> isset($header->incoming_no) ? $header->incoming_no : ""
-            ]);        
-           
-           
-            $data["fields"][]      = form_hidden(array("name"=>"receive_date", "label"=>($this->isVendor == "YES") ? "Sending Date" : "Receive Date", "mandatory"=>"yes", "value"=>date("d/m/Y")));
-            $data["fields"][]      = form_hidden(array("name"=>"sender_date", "label"=>"Sender Date", "mandatory"=>"yes", "value"=>date("d/m/Y")));
-            //$data["fields"][]      = form_text(array("name"=>"subject", "label"=>"Subject", "mandatory"=>"yes", "value"=>""));
-            
-            $data["fields"][] = form_text(array(
-            "name"=>"subject",
-            "label"=>"Subject",
-            "mandatory"=>"yes",
-            "value"=> isset($header->subject) ? $header->subject : ""
-            ));
-                        
-            $data["fields"][]      = form_hidden(array("name"=>"return_date_plan", "label"=>"Return Plan Date", "value"=>date("d/m/Y")));
-            $data["fields"][]      = form_hidden(array("name"=>"return_date_actual", "label"=>"Return Plan Actual", "value"=>date("d/m/Y")));  
-            $data["fields"][]      = form_text(array("name"=>"description", "label"=>"Remark"));          
-            $data["fields"][]      = form_upload(array("name"=>"receipt", "label"=>"Receipt"));
-            
-            
-            
-            $data["fields"][] = form_hidden(array(
-            "name"=>"incoming_transmittal_id",
-            "value"=> isset($header->incoming_transmittal_id) ? $header->incoming_transmittal_id : ""
-            ));
-            
-            
-            /* ----------
-             Modal Fields
-            ----------------------- */
-            $data["fields_modal"][]= form_upload(array("name"=>"document_file", "label"=>"Document File"));
-            $data["fields_modal"][]= form_upload(array("name"=>"document_crs", "label"=>"CRS File"));
-            $data["fields_modal"][]= form_select(array("name"=>"document_id", "label"=>"Document Number", "source"=>$selectDocument));
-            $data["fields_modal"][]= form_select(array("name"=>"issue_status_id", "label"=>"Issue Status", "withnull"=>"yes", "source"=>$selectIssueStatus, "value"=>0));
-            $data["fields_modal"][]= form_select(array("name"=>"document_status_id", "label"=>"Revision Number", "withnull"=>"yes", "source"=>$selectDocumentStatus));
-            $data["fields_modal"][]= form_hidden(array("name"=>"return_status_id", "label"=>"Return Status", "withnull"=>"yes", "source"=>$selectReturnStatus));
-            $data["fields_modal"][]= form_text(array("name"=>"remark", "label"=>"Description"));
-            /* ----------
-             Modal Fields
-            ----------------------- */
-            $data["fields_modal_ifi"][]= form_hidden(array("name"=>"project_id", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
-            $data["fields_modal_ifi"][]= form_select(array("name"=>"project_id_ifi", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
-            $data["fields_modal_ifi"][]= form_select(array("name"=>"vendor_id_ifi", "label"=>"Vendor", "source"=>$selectVendorUser, "readonly"=>"readonly"));
-            $data["fields_modal_ifi"][]= form_upload(array("name"=>"document_file_ifi", "label"=>"Document IFI"));
-            $data["fields_modal_ifi"][]= form_text(array("name"=>"document_no_ifi", "label"=>"Document Number"));
-            $data["fields_modal_ifi"][]= form_text(array("name"=>"document_name_ifi", "label"=>"Document Name"));
-            $data["fields_modal_ifi"][]= form_select(array("name"=>"issue_status_id_ifi", "label"=>"Issue Status", "source"=>$selectIssueStatusIFI, "value"=>STATUS_ONLY_IFI));
-            $data["fields_modal_ifi"][]= form_select(array("name"=>"document_status_id_ifi", "label"=>"Revision Number", "source"=>$selectDocumentStatusIFI, "value"=>120));
-            $data["fields_modal_ifi"][]= form_hidden(array("name"=>"return_status_id_ifi", "label"=>"Return Status", "withnull"=>"yes", "source"=>$selectReturnStatus));
-            $data["fields_modal_ifi"][]= form_text(array("name"=>"remark_ifi", "label"=>"Description"));
-            /* ----------
-             Modal Fields
-            ----------------------- */
-            $data["fields_modal_ifi_contruction"][]= form_hidden(array("name"=>"project_id", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
-            $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"project_id_ifi_contruction", "label"=>"Project", "source"=>$selectProjectUser, "readonly"=>"readonly"));
-            $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"vendor_id_ifi_contruction", "label"=>"Vendor", "source"=>$selectVendorUser, "readonly"=>"readonly"));
-            $data["fields_modal_ifi_contruction"][]= form_upload(array("name"=>"document_file_ifi_contruction", "label"=>"Document IFC"));
-            $data["fields_modal_ifi_contruction"][]= form_text(array("name"=>"document_no_ifi_contruction", "label"=>"Document Number"));
-            $data["fields_modal_ifi_contruction"][]= form_text(array("name"=>"document_name_ifi_contruction", "label"=>"Document Name"));
-            $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"issue_status_id_ifi_contruction", "label"=>"Issue Status", "source"=>$selectIssueStatusIFIContruction, "value"=>STATUS_ONLY_IFI_CONSTRUCTION));
-            $data["fields_modal_ifi_contruction"][]= form_select(array("name"=>"document_status_id_ifi_contruction", "label"=>"Revision Number", "source"=>$selectDocumentStatusIFI, "value"=>120));
-            $data["fields_modal_ifi_contruction"][]= form_hidden(array("name"=>"return_status_id_ifi_contruction", "label"=>"Return Status", "withnull"=>"yes", "source"=>$selectReturnStatus));
-            $data["fields_modal_ifi_contruction"][]= form_text(array("name"=>"remark_ifi_contruction", "label"=>"Description"));
-            # ---------------
-            $data["buttons"][]     = form_button_submit(array("name"=>"button_save", "label"=>"&nbsp;&nbsp;Save&nbsp;&nbsp;"));
-            $data["buttons"][]     = form_button_cancel(array("name"=>"button_cancel", "label"=>"Cancel"));
-            # ---------------
-            $data["attach_url"]    = "/incoming/attach_item";
-            $data["delete_url"]    = "/incoming/delete_item";
-            # ---------------
-            return view("incoming.form-add-with-ifi-contruction", $data);
-        } catch (\Exception $e) {
-            $this->logModel->createError($e->getMessage(), "PAGE USER", "");
-            throw $e;
-            # ---------------
-            return view("error.405");
-        }        
-    }
-
-    public function attach_item(Request $request) {
-        try {
-            $dataConfig     = $this->sysModel->getConfig();
-            $extention      = $dataConfig->attachment_extention;
-            $max_size       = $dataConfig->attachment_max_size;
-            if($max_size > 0) {
-                if(!empty($extention)) {
-                    $validate_message   = "Attachment extention must $extention & maximum size " . number_format($max_size, 0) . " kb"; 
-                    $rules              = array(
-                        "document_file" => "required|mimes:$extention|max:$max_size",
-                        // "document_crs" => "required|mimes:$extention|max:$max_size"
-                    );
-                } else {
-                    $validate_message   = "Attachment maximum size " . number_format($max_size, 0) . " kb";
-                    $rules = array(
-                        "document_file" => "required|max:$max_size",
-                        // "document_crs" => "required|max:$max_size"
-                    );
-                }
+        } else {
+            if(!empty($extention)) {
+                $validate_message   = "Attachment extention must $extention"; 
+                $rules              = array(
+                    "document_file" => "required|mimes:$extention",
+                    // "document_crs" => "required|mimes:$extention"
+                );
             } else {
-                if(!empty($extention)) {
-                    $validate_message   = "Attachment extention must $extention"; 
-                    $rules              = array(
-                        "document_file" => "required|mimes:$extention",
-                        // "document_crs" => "required|mimes:$extention"
-                    );
-                } else {
-                    $validate_message   = "Attachment is required kb";
-                    $rules = array(
-                        "document_file" => "required",
-                        // "document_crs" => "required"
-                    );
-                }
-            }            
+                $validate_message   = "Attachment is required kb";
+                $rules = array(
+                    "document_file" => "required",
+                    // "document_crs" => "required"
+                );
+            }
+        }            
 
-            $messages = [
-                
+        $messages = [
+            
+        ];
+
+        $validator = Validator::make($request->all(), $rules, $messages);
+
+        if ($validator->fails()) {
+            $response   = [
+                "status" => ERROR_STATUS_CODE,
+                "message" => $validate_message,
+                "data" => [],
             ];
+        } else {
+            // $cek_status     = $this->qDocument->get($request->document_id);
+            // $true_status    = "F";
 
-            $validator = Validator::make($request->all(), $rules, $messages);
-
-            if ($validator->fails()) {
-                $response   = [
-                    "status" => ERROR_STATUS_CODE,
-                    "message" => $validate_message,
-                    "data" => [],
-                ];
-            } else {
-                // $cek_status     = $this->qDocument->get($request->document_id);
-                // $true_status    = "F";
-
-                // if($request->issue_status_id != 13) { //IFI
-                //     if($cek_status->issue_status_id == 0) {
-                //         $true_status    = "T";
-                //     } else {
-                //         if($cek_status->issue_status_id != $request->issue_status_id) {
-                //             $true_status    = "F";
-                //         } else {
-                //             $true_status    = "T";
-                //         }
-                //     }    
-                // } else {
-                    $true_status    = "T";
-                // }
+            // if($request->issue_status_id != 13) { //IFI
+            //     if($cek_status->issue_status_id == 0) {
+            //         $true_status    = "T";
+            //     } else {
+            //         if($cek_status->issue_status_id != $request->issue_status_id) {
+            //             $true_status    = "F";
+            //         } else {
+            //             $true_status    = "T";
+            //         }
+            //     }    
+            // } else {
+                $true_status    = "T";
+            // }
                 
-                if($true_status == "T") {
-                    $response   = $this->qIncoming->attachItem($request);
+            if($true_status == "T") {
+                $response   = $this->qIncoming->attachItem($request);
             
-                    if($response["status"]) {
-                        $items  = $this->qIncoming->getItemTemp();
+                if($response["status"]) {
+                    $items  = $this->qIncoming->getItemTemp();
 
                         $response   = [
                             "status" => SUCCESS_STATUS_CODE,

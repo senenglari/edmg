@@ -67,6 +67,7 @@ class OutgoingModel extends Model
             $query  = DB::table($this->table)
                                 ->select("$this->table.*", DB::RAW("DATE_FORMAT($this->table.sender_date, '%d/%m/%Y') AS sen_date"), "ref_vendor.name AS vendor_name", DB::RAW("IF(ISNULL($this->table.sender_date), 'Draft', 'Sent') AS status_code"))
                                 ->join("ref_vendor", "$this->table.vendor_id", "ref_vendor.vendor_id")
+                                ->whereRaw("$this->table.outgoing_no NOT REGEXP '^REV-[0-9]+-[0-9]+$'")
                                 ->orderBy("$this->table.outgoing_transmittal_id", "DESC");
 
             if(session()->has("SES_SEARCH_OUTGOING_NO") != "") {
@@ -113,6 +114,7 @@ class OutgoingModel extends Model
                                 ->select("$this->table.*", DB::RAW("DATE_FORMAT($this->table.sender_date, '%d/%m/%Y') AS sen_date"), "ref_vendor.name AS vendor_name", DB::RAW("IF(ISNULL($this->table.sender_date), 'Draft', 'Sent') AS status_code"))
                                 ->join("ref_vendor", "$this->table.vendor_id", "ref_vendor.vendor_id")
                                 ->whereRaw("NOT ISNULL($this->table.sender_date)")
+                                ->whereRaw("$this->table.outgoing_no NOT REGEXP '^REV-[0-9]+-[0-9]+$'")
                                 ->orderBy("$this->table.outgoing_transmittal_id", "DESC");
 
             if(session()->has("SES_SEARCH_OUTGOING_NO") != "") {
@@ -409,7 +411,53 @@ class OutgoingModel extends Model
                                SET      incoming_transmittal.return_date_actual = '$actual'
                                WHERE    outgoing_transmittal_detail.outgoing_transmittal_id = '$request->idData'");
             /* ----------
-              Email
+              Auto-create vendor draft (incoming + outgoing) — SELALU jalan
+            ----------------------- */
+                $vendorId = DB::table("outgoing_transmittal")
+                    ->where("outgoing_transmittal_id", $request->idData)
+                    ->value("vendor_id");
+
+                $incomingId = DB::table("incoming_transmittal")->insertGetId([
+                    "vendor_id" => $request->vendor_id ?? $vendorId,
+                    "incoming_no" => "AUTO-" . date("YmdHis"),
+                    "subject" => $request->subject,
+                    "created_by" => Auth::id(),
+                    "created_at" => now(),
+                    "status" => 1
+                ]);
+
+                $docs = DB::table("outgoing_transmittal_detail")
+                    ->join(
+                        "incoming_transmittal_detail",
+                        "outgoing_transmittal_detail.incoming_transmittal_detail_id",
+                        "=",
+                        "incoming_transmittal_detail.incoming_transmittal_detail_id"
+                    )
+                    ->select("incoming_transmittal_detail.document_id")
+                    ->where("outgoing_transmittal_detail.outgoing_transmittal_id", $request->idData)
+                    ->get();
+
+                $vendorOutgoingId = DB::table("outgoing_transmittal")->insertGetId([
+                    "vendor_id" => $request->vendor_id ?? $vendorId,
+                    "outgoing_no" => "REV-" . date("YmdHis"),
+                    "subject" => "UPLOAD REVISION - " . $request->subject,
+                    "content" => "Please upload revised document",
+                    "status_email" => 1, // draft
+                    "created_by" => Auth::id(),
+                    "created_at" => now()
+                ]);
+
+                foreach ($docs as $doc) {
+                    DB::table("incoming_transmittal_detail")->insert([
+                        "incoming_transmittal_id" => $incomingId,
+                        "document_id" => $doc->document_id,
+                        "issue_status_incoming_id" => 2,
+                        "issue_status_id" => 2
+                    ]);
+                }
+
+            /* ----------
+              Email — hanya kirim kalau config aktif, gagal email TIDAK rollback
             ----------------------- */
                 if($this->sysModel->getConfig()->email_status == 1) {
                     $title              = $request->subject;
@@ -417,7 +465,6 @@ class OutgoingModel extends Model
                     $data["subject"]    = $request->subject;
                     $data["content"]    = $request->content;
                     $emails             = explode(",", str_replace(" ", "", $request->email_address));
-                    //$email_cc           = explode(",", str_replace(" ", "", $cc_email_address));
                     
                     $email_cc = $cc_email_address  ? explode(",", str_replace(" ", "", $cc_email_address)) : [];
                     
@@ -447,110 +494,31 @@ class OutgoingModel extends Model
                     $data['file_url_and_file_name']     = DOCUMENT_DIR_OUTGOING . '/' . $request->idData . "/".$data["title"].'.pdf';
                     $data['issue_status_name']          = str_replace("Re-", "", array_column($data["detail"]->toArray(), 'issue_status_name'));
                     # ------------------------
-                    $this->printOutGoing($data);
+                    try {
+                        $this->printOutGoing($data);
+                    } catch (\Exception $pdfEx) {
+                        // PDF gagal generate — log tapi jangan rollback
+                        $this->logModel->createError($pdfEx->getMessage(), "GENERATE PDF OUTGOING FAILED", "");
+                    }
 
                     $fileName   = public_path('uploads') . $data['file_url_and_file_name'];
-                    // $zip        = new ZipArchive;
-                    // $compress   = false;
-                    // $fileName   = public_path('uploads') . DOCUMENT_DIR_OUTGOING . '/' .$data["title"] . ".zip";
-                    // $directory  = public_path('uploads') . DOCUMENT_DIR_OUTGOING . "/";
-                    
-                    // if($zip->open($fileName, ZipArchive::CREATE) === TRUE){
-                    //     $location   = public_path('uploads') . DOCUMENT_DIR_OUTGOING . '/' . $request->idData;
-                    //     $files      = File::files($location);
-                    //     foreach ($files as $key => $value) {    
-                    //         $relativeNameInZipFile = basename($value);
-                    //         $compress = $zip->addFile($value, $relativeNameInZipFile);
-                    //     }
-                    // }
-
-                    // if($compress) {
-                    //     $zip->close();    
-                    // } 
 
                     # ---------------
                     if($request->status_email > 1) {
+                        try {
                             Mail::send('email.outgoing-notification', $data, function($message) use ($title, $emails, $email_cc, $fileName){
-                            $message->to($emails)->subject($title)
-                                    ->attach($fileName)
-                            ;
-                            $message->cc($email_cc);
-                            # ---------------
-                            $message->from(env("MAIL_USERNAME"), 'Automatic Mail System');
-                        });
+                                $message->to($emails)->subject($title)
+                                        ->attach($fileName)
+                                ;
+                                $message->cc($email_cc);
+                                # ---------------
+                                $message->from(env("MAIL_USERNAME"), 'Automatic Mail System');
+                            });
+                        } catch (\Exception $mailEx) {
+                            // Email gagal kirim — log tapi jangan rollback
+                            $this->logModel->createError($mailEx->getMessage(), "SEND EMAIL OUTGOING FAILED", "");
+                        }
                     }
-                    
-                    
- 
- 
- $vendorId = DB::table("outgoing_transmittal")
-    ->where("outgoing_transmittal_id",$request->idData)
-    ->value("vendor_id");
- 
-                    
-                    $incomingId = DB::table("incoming_transmittal")->insertGetId([
-                        "vendor_id" => $request->vendor_id ?? $vendorId,
-                        "incoming_no" => "AUTO-" . date("YmdHis"),
-                        "subject" => $request->subject,
-                        "created_by" => Auth::id(),
-                        "created_at" => now(),
-                        "status" => 1
-                    ]);
-
-                    
-                    $docs = DB::table("outgoing_transmittal_detail")
-                        ->join(
-                            "incoming_transmittal_detail",
-                            "outgoing_transmittal_detail.incoming_transmittal_detail_id",
-                            "=",
-                            "incoming_transmittal_detail.incoming_transmittal_detail_id"
-                        )
-                        ->select("incoming_transmittal_detail.document_id")
-                        ->where("outgoing_transmittal_detail.outgoing_transmittal_id",$request->idData)
-                        ->get();
-                        
-   
-   
-   
-                             $vendorOutgoingId = DB::table("outgoing_transmittal")->insertGetId([
-                                "vendor_id" => $request->vendor_id,
-                                "outgoing_no" => "REV-" . date("YmdHis"),
-                                "subject" => "UPLOAD REVISION - ".$request->subject,
-                                "content" => "Please upload revised document",
-                                "status_email" => 1, // draft
-                                "created_by" => Auth::id(),
-                                "created_at" => now()
-                            ]);
-                              
-   
-                        
-                        
-                        foreach($docs as $doc){
-                            
-                            
-                            // $incomingDetailId = DB::table("incoming_transmittal_detail")->insertGetId([
-                            // "incoming_transmittal_id"=>$incomingId,
-                            // "document_id"=>$doc->document_id
-                            // ]);
-                            
-                            // DB::table("outgoing_transmittal_detail")->insert([
-                            // "outgoing_transmittal_id"=>$vendorOutgoingId,
-                            // "incoming_transmittal_detail_id"=>$incomingDetailId
-                            // ]);
-                            
-                                DB::table("incoming_transmittal_detail")->insert([
-                                    "incoming_transmittal_id"=>$incomingId,
-                                    "document_id"=>$doc->document_id,
-                                    "issue_status_incoming_id"=>2,
-                                    "issue_status_id"=>2
-                                ]);
-        
-
-                        
-                        }        
-                        
-                        
-                    
                 }
             /* ----------
              Logs
@@ -994,6 +962,195 @@ class OutgoingModel extends Model
             $id    = $this->logModel->createError($e->getMessage(), "DELETE OUTGOING TRANSMITTAL DETAIL FAILED", "");
             # ---------------
             return array("status"=>false, "id"=>0);
+        }
+    }
+
+    public function getCollectionsCompany() {
+        try {
+            $query = DB::table($this->table)
+                ->select(
+                    "$this->table.*",
+                    DB::RAW("DATE_FORMAT($this->table.sender_date, '%d/%m/%Y') AS sen_date"),
+                    "ref_vendor.name AS vendor_name",
+                    DB::RAW("IF(ISNULL($this->table.sender_date), 'Draft', 'Sent') AS status_code")
+                )
+                ->join("ref_vendor", "$this->table.vendor_id", "ref_vendor.vendor_id")
+                ->whereRaw("$this->table.outgoing_no REGEXP '^REV-[0-9]+-[0-9]+$'")
+                ->orderBy("$this->table.outgoing_transmittal_id", "DESC");
+
+            if(session()->has("SES_SEARCH_OUTCOMPANY_NO") && session()->get("SES_SEARCH_OUTCOMPANY_NO") != "") {
+                $query->where("$this->table.outgoing_no", "LIKE", "%" . session()->get("SES_SEARCH_OUTCOMPANY_NO") . "%");
+            }
+            if(session()->has("SES_SEARCH_OUTCOMPANY_SUBJECT") && session()->get("SES_SEARCH_OUTCOMPANY_SUBJECT") != "") {
+                $query->where("$this->table.subject", "LIKE", "%" . session()->get("SES_SEARCH_OUTCOMPANY_SUBJECT") . "%");
+            }
+            if(session()->has("SES_SEARCH_OUTCOMPANY_SENDING") && session()->get("SES_SEARCH_OUTCOMPANY_SENDING") != "") {
+                $query->where("$this->table.sender_date", setYMD(session()->get("SES_SEARCH_OUTCOMPANY_SENDING"), "/"));
+            }
+            if(session()->has("SES_SEARCH_OUTCOMPANY_VENDOR") && session()->get("SES_SEARCH_OUTCOMPANY_VENDOR") != "0") {
+                $query->where("$this->table.vendor_id", session()->get("SES_SEARCH_OUTCOMPANY_VENDOR"));
+            }
+
+            $result = $query->paginate(PAGINATION);
+            return array("status" => true, "data" => $result);
+        } catch (\Exception $e) {
+            throw $e;
+        }
+    }
+
+    public function updateOutgoingDetailCompany($request) {
+        DB::beginTransaction();
+        try {
+            $actual = date("Y-m-d");
+
+            // CC emails from commenters
+            $qCC = DB::table("outgoing_transmittal_detail")
+                ->select(DB::RAW("GROUP_CONCAT(DISTINCT(sys_users.email)) AS cc_email_address"))
+                ->join("incoming_transmittal_detail", "outgoing_transmittal_detail.incoming_transmittal_detail_id", "incoming_transmittal_detail.incoming_transmittal_detail_id")
+                ->join("assignment", "incoming_transmittal_detail.incoming_transmittal_detail_id", "assignment.incoming_transmittal_detail_id")
+                ->join("comment", "assignment.assignment_id", "comment.assignment_id")
+                ->join("sys_users", "comment.user_id", "sys_users.id")
+                ->where("outgoing_transmittal_detail.outgoing_transmittal_id", $request->idData)
+                ->first();
+
+            $cc_email_address = optional($qCC)->cc_email_address;
+
+            // Update header
+            DB::table("outgoing_transmittal")
+                ->where("outgoing_transmittal_id", "=", $request->idData)
+                ->update([
+                    "email_address"    => $request->email_address,
+                    "cc_email_address" => $request->cc_email_address,
+                    "subject"          => $request->subject,
+                    "content"          => $request->content,
+                    "sender_date"      => $actual,
+                    "status_email"     => $request->status_email,
+                ]);
+
+            // Update document status
+            DB::statement("UPDATE   document INNER JOIN incoming_transmittal_detail ON document.document_id = incoming_transmittal_detail.document_id
+                           INNER    JOIN outgoing_transmittal_detail ON incoming_transmittal_detail.incoming_transmittal_detail_id = outgoing_transmittal_detail.incoming_transmittal_detail_id
+                           SET      document.outgoing_transmittal_detail_id = outgoing_transmittal_detail.outgoing_transmittal_detail_id
+                                    , document.status = 4
+                           WHERE    outgoing_transmittal_detail.outgoing_transmittal_id = ?", [$request->idData]);
+
+            // Update incoming return date
+            DB::statement("UPDATE   incoming_transmittal INNER JOIN incoming_transmittal_detail ON incoming_transmittal.incoming_transmittal_id = incoming_transmittal_detail.incoming_transmittal_id
+                           INNER    JOIN outgoing_transmittal_detail ON incoming_transmittal_detail.incoming_transmittal_detail_id = outgoing_transmittal_detail.incoming_transmittal_detail_id
+                           SET      incoming_transmittal.return_date_actual = ?
+                           WHERE    outgoing_transmittal_detail.outgoing_transmittal_id = ?", [$actual, $request->idData]);
+
+            // Auto-create INTERNAL outgoing draft — nanti user send dari /outgoing/index → baru bikin vendor draft
+            $currentOutgoing = DB::table("outgoing_transmittal")
+                ->where("outgoing_transmittal_id", $request->idData)
+                ->first();
+            $vendorId  = $currentOutgoing->vendor_id;
+            $projectId = $currentOutgoing->project_id ?? 0;
+
+            // Ambil detail dari company outgoing (incoming_transmittal_detail_id + status)
+            $companyDetails = DB::table("outgoing_transmittal_detail")
+                ->select("incoming_transmittal_detail_id",
+                    "issue_status_id",
+                    "return_status_id",
+                    "document_status_id",
+                    "document_url",
+                    "document_file",
+                    "document_crs")
+                ->where("outgoing_transmittal_id", $request->idData)
+                ->get();
+
+            // Create internal outgoing draft (muncul di /outgoing/index sebagai Draft)
+            $internalOutgoingId = DB::table("outgoing_transmittal")->insertGetId([
+                "vendor_id"    => $request->vendor_id ?? $vendorId,
+                "project_id"   => $projectId,
+                "outgoing_no"  => "AUTO-REV-" . date("YmdHis"),
+                "sender_date"  => null,
+                "subject"      => $request->subject,
+                "content"      => $request->content ?? "Please upload revised document",
+                "status_email" => 0,
+                "created_by"   => Auth::id(),
+                "created_at"   => now()
+            ]);
+
+            // Link same incoming_transmittal_detail ke internal outgoing
+            foreach ($companyDetails as $detail) {
+                DB::table("outgoing_transmittal_detail")->insert([
+                    "outgoing_transmittal_id"        => $internalOutgoingId,
+                    "incoming_transmittal_detail_id" => $detail->incoming_transmittal_detail_id,
+                    "issue_status_id"                => $detail->issue_status_id ?? 0,
+                    "return_status_id"               => $detail->return_status_id ?? 0,
+                    "document_status_id"             => $detail->document_status_id ?? 0,
+                    "document_url"                   => $detail->document_url,
+                    "document_file"                  => $detail->document_file,
+                    "document_crs"                   => $detail->document_crs,
+                ]);
+            }
+
+            // Email — hanya kirim kalau config aktif
+            if($this->sysModel->getConfig()->email_status == 1) {
+                $title  = $request->subject;
+                $data["out_no"]  = $request->outgoing_no;
+                $data["subject"] = $request->subject;
+                $data["content"] = $request->content;
+                $emails = explode(",", str_replace(" ", "", $request->email_address));
+                $email_cc = $cc_email_address ? explode(",", str_replace(" ", "", $cc_email_address)) : [];
+
+                $data["detail"] = DB::table("outgoing_transmittal_detail")
+                    ->select("document.document_no", "document.document_title",
+                        "ref_return_status.name AS return_status_name",
+                        "ref_issue_status.name AS issue_status_name",
+                        "ref_document_status.name AS document_status_name")
+                    ->join("incoming_transmittal_detail", "outgoing_transmittal_detail.incoming_transmittal_detail_id", "incoming_transmittal_detail.incoming_transmittal_detail_id")
+                    ->join("document", "incoming_transmittal_detail.document_id", "document.document_id")
+                    ->join("ref_return_status", "outgoing_transmittal_detail.return_status_id", "ref_return_status.return_status_id")
+                    ->join("ref_issue_status", "outgoing_transmittal_detail.issue_status_id", "ref_issue_status.issue_status_id")
+                    ->leftJoin("ref_document_status", "outgoing_transmittal_detail.document_status_id", "ref_document_status.document_status_id")
+                    ->where("outgoing_transmittal_detail.outgoing_transmittal_id", $request->idData)
+                    ->get();
+
+                $data['title']                    = 'TRANSMITTAL-LETTER ' . $title;
+                $data['logo_medco']               = public_path() . "/app/img/icon/logo_medco.png";
+                $data['logo_hanochem']            = public_path() . "/app/img/icon/hanochem.png";
+                $data['logo_kanan_tengah']        = public_path() . "/app/img/icon/logo_kanan_tengah.png";
+                $data['logo_kanan_pojok']         = public_path() . "/app/img/icon/logo_kanan_pojok.png";
+                $data['logo_kiri']                = public_path() . "/app/img/icon/hanochem.png";
+                $data['project_name']             = $request->project_name ?? '';
+                $data['vendor_name']              = $request->vendor_name;
+                $data['vendor_pic']               = $request->vendor_pic;
+                $data['vendor_address']           = $request->vendor_address;
+                $data['vendor_phone_number']      = $request->vendor_phone_number;
+                $data['file_url_and_file_name']   = DOCUMENT_DIR_OUTGOING . '/' . $request->idData . "/" . $data["title"] . '.pdf';
+                $data['issue_status_name']        = str_replace("Re-", "", array_column($data["detail"]->toArray(), 'issue_status_name'));
+
+                try {
+                    $this->printOutGoing($data);
+                } catch (\Exception $pdfEx) {
+                    $this->logModel->createError($pdfEx->getMessage(), "GENERATE PDF OUTGOING COMPANY FAILED", "");
+                }
+
+                $fileName = public_path('uploads') . $data['file_url_and_file_name'];
+
+                if($request->status_email > 1) {
+                    try {
+                        Mail::send('email.outgoing-notification', $data, function($message) use ($title, $emails, $email_cc, $fileName){
+                            $message->to($emails)->subject($title)->attach($fileName);
+                            $message->cc($email_cc);
+                            $message->from(env("MAIL_USERNAME"), 'Automatic Mail System');
+                        });
+                    } catch (\Exception $mailEx) {
+                        $this->logModel->createError($mailEx->getMessage(), "SEND EMAIL OUTGOING COMPANY FAILED", "");
+                    }
+                }
+            }
+
+            $this->logModel->createLog("UPDATE OUTGOING COMPANY (" . $request->idData . ")", Auth::user()->id, $request);
+
+            DB::commit();
+            return array("status" => true, "id" => 0);
+        } catch (\Exception $e) {
+            DB::rollback();
+            $this->logModel->createError($e->getMessage(), "OUTGOING COMPANY DETAIL FAILED", "");
+            return array("status" => false, "id" => 0);
         }
     }
 

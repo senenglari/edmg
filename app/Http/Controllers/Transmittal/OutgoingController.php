@@ -452,6 +452,11 @@ class OutgoingController extends Controller
             ----------------------- */
             $data["header"]        = $this->qOutgoing->getHeader($idData);
 
+            // Guard: jika ini outgoing company (REV-xxx-xxx), redirect ke outgoing company
+            if($data["header"] && preg_match('/^REV-[0-9]+-[0-9]+$/', $data["header"]->outgoing_no)) {
+                return redirect("/outgoing_company/index");
+            }
+
             if($data["header"]->sender_date != null) {
                 session()->flash("error_message", "Outgoing cannot be changed");
                 # ---------------
@@ -521,6 +526,13 @@ class OutgoingController extends Controller
     public function updatedetail(Request $request) {
         
         try {
+            // Guard: jangan proses outgoing company lewat internal flow
+            $header = $this->qOutgoing->getHeader($request->idData);
+            if($header && preg_match('/^REV-[0-9]+-[0-9]+$/', $header->outgoing_no)) {
+                session()->flash("error_message", "This is an Outgoing Company record. Please process from Outgoing Company menu.");
+                return redirect("/outgoing_company/index");
+            }
+
             // $this->qOutgoing->printOutgoing($request);
             // $this->qOutgoing->printReviewResult($request);
             $response   = $this->qOutgoing->updateOutgoingDetail($request);

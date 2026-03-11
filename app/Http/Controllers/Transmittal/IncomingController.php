@@ -750,7 +750,7 @@ public function checkOwnerCompletion($documentId)
         ->count('user_id');
         
     // If all owner users completed, assign to APPROVER COMPANY
-    if ($ownerCount >= $totalOwner) {
+    if ($totalOwner > 0 && $ownerCount >= $totalOwner) {
         // advance backdoor stage to Approver (5)
         DB::table('document')->where('document_id',$documentId)->update(['note_backdoor'=>'5']);
 
@@ -922,8 +922,8 @@ public function incomingCompanyTransmittalDetail($documentId)
 
 public function incomingCompanyIndex(\Illuminate\Http\Request $request)
 {
-    // Tampilkan dokumen dengan status IFC (1), IFA (3), IFI (7), dan IFI (7)
-    $externalStatusIds = [STATUS_IFC, STATUS_IFA, STATUS_IFI, STATUS_IFI]; // 1, 3, 7, 7
+    // Tampilkan dokumen dengan status IFC (1), IFA (3), IFR (5), IFI (7)
+    $externalStatusIds = [STATUS_IFC, STATUS_IFA, STATUS_IFR, STATUS_IFI]; // 1, 3, 5, 7
     
     $q = DB::table('document AS d')
         ->leftJoin('ref_vendor AS v', 'v.vendor_id', '=', 'd.vendor_id')
@@ -943,7 +943,17 @@ public function incomingCompanyIndex(\Illuminate\Http\Request $request)
             DB::RAW("(CASE WHEN d.note_backdoor IS NULL OR d.note_backdoor = '' THEN 'Pending' WHEN d.note_backdoor = '3' THEN 'On Review' WHEN d.note_backdoor = '4' THEN 'Owner' WHEN d.note_backdoor = '5' THEN 'Approver' WHEN d.note_backdoor = '6' THEN 'Done' ELSE d.note_backdoor END) AS backdoor_status"),
             'd.deadline'
         )
-        ->whereIn('d.issue_status_id', $externalStatusIds) // IFC, IFA, IFI
+        ->whereIn('d.issue_status_id', $externalStatusIds) // IFC, IFA, IFR, IFI
+        // Jangan tampilkan dokumen yang masih punya outgoing company BELUM dikirim (draft)
+        ->whereNotExists(function ($sub) {
+            $sub->select(DB::raw(1))
+                ->from('outgoing_transmittal_detail AS otd2')
+                ->join('incoming_transmittal_detail AS itd2', 'otd2.incoming_transmittal_detail_id', '=', 'itd2.incoming_transmittal_detail_id')
+                ->join('outgoing_transmittal AS ot2', 'ot2.outgoing_transmittal_id', '=', 'otd2.outgoing_transmittal_id')
+                ->whereRaw('itd2.document_id = d.document_id')
+                ->whereRaw("ot2.outgoing_no REGEXP '^REV-[0-9]+-[0-9]+$'")
+                ->whereNull('ot2.sender_date');
+        })
         ->orderBy('d.issue_status_id') // Group by status
         ->orderByDesc('d.document_id');
 
@@ -987,7 +997,7 @@ public function incomingCompanyIndex(\Illuminate\Http\Request $request)
     $statusOptions = [
         ['id' => STATUS_IFC, 'name' => 'IFC'],
         ['id' => STATUS_IFA, 'name' => 'IFA'], 
-        ['id' => STATUS_IFI, 'name' => 'IFI'],
+        ['id' => STATUS_IFR, 'name' => 'IFR'],
         ['id' => STATUS_IFI, 'name' => 'IFI'],
         ['id' => 'pending', 'name' => 'Pending'],
         ['id' => 'on_review', 'name' => 'On Review'],
@@ -996,7 +1006,7 @@ public function incomingCompanyIndex(\Illuminate\Http\Request $request)
         ['id' => 'done', 'name' => 'Done'],
     ];
 
-    $title = 'Incoming Company – External Documents (IFC/IFA/IFI)';
+    $title = 'Incoming Company – External Documents (IFC/IFA/IFR/IFI)';
     return view('incoming.incoming_company_index', compact('documents', 'title', 'statusOptions'));
 }
     
@@ -1035,9 +1045,10 @@ public function commentCompany($documentId)
         ]);
 
     $editComment = null;
-    if (request()->has('edit_id')) {
+    $commentIdParam = request('comment_id') ?? request('edit_id');
+    if ($commentIdParam) {
         $editComment = DB::table('comment')
-            ->where('comment_id', request('edit_id'))
+            ->where('comment_id', $commentIdParam)
             ->first();
     }
 
@@ -1083,23 +1094,27 @@ public function commentCompanyList()
     ->join('assignment as a','a.document_id','=','d.document_id')
     ->join('comment as c','c.assignment_id','=','a.assignment_id')
     ->leftJoin('ref_vendor as v','v.vendor_id','=','d.vendor_id')
-    ->leftJoin('ref_issue_status as is','is.issue_status_id','=','d.issue_status_id')
+    ->leftJoin('ref_issue_status as isz','isz.issue_status_id','=','d.issue_status_id')
     ->where('c.user_id',$userId)
     ->whereIn('c.role',['RESPONSIBLE','OWNER','APPROVER_COMPANY'])
     ->where('c.status','<',30)
-    // hide documents that are already revised (2) or done (6)
     ->whereNotIn('d.note_backdoor', ['2', '6'])
-    // if user is OWNER, hide documents already at backdoor stage 5 (approver stage)
     ->where(function($q){
         $q->where('c.role','!=','OWNER')
-          ->orWhere('d.note_backdoor','<>','5');
+          ->orWhere('d.note_backdoor','=','4');
+    })
+    ->where(function($q){
+        $q->where('c.role','!=','APPROVER_COMPANY')
+          ->orWhere('d.note_backdoor','=','5');
     })
     ->select(
+        'c.comment_id',
         'd.document_id',
         'd.document_no',
         'd.document_title',
         'd.issue_status_id',
-        'is.name as issue_status_name',
+        'isz.name as issue_status_name',
+        'c.return_status_id',
         'v.name as vendor_name',
         'd.note_backdoor',
         'c.role as user_role'
@@ -1189,7 +1204,7 @@ return view('comments.company_list',compact(
                 'remark'=>$request->remark,
                 'status'=>$request->status,
                 'issue_status_id'=>$issueStatus,
-                'return_status_id'=>$request->return_status_id,
+                'return_status_id'=>$request->return_status_id ?? 0,
                 'updated_by'=>Auth::id(),
                 'updated_at'=>now()
             ]);
@@ -1207,6 +1222,35 @@ return view('comments.company_list',compact(
     if ($roleDone === 'OWNER' && $request->status == 30) {
         DB::table('document')->where('document_id', $docId)->update(['note_backdoor' => '5']);
     }
+
+    // RESPONSIBLE: cek semua responsible udah isi return_status_id atau status=30
+    if ($roleDone === 'RESPONSIBLE') {
+        // Cari assignment terbaru (aktif) untuk document ini
+        $latestAssignmentId = DB::table('assignment')
+            ->where('document_id', $docId)
+            ->max('assignment_id');
+
+        if ($latestAssignmentId) {
+            // Hitung RESPONSIBLE dari assignment terbaru saja
+            $totalResponsible = DB::table('comment')
+                ->where('assignment_id', $latestAssignmentId)
+                ->where('role', 'RESPONSIBLE')
+                ->count();
+
+            // Hitung yang sudah selesai: status = 30 (Done)
+            $doneResponsible = DB::table('comment')
+                ->where('assignment_id', $latestAssignmentId)
+                ->where('role', 'RESPONSIBLE')
+                ->where('status', 30)
+                ->count();
+
+            // Semua responsible sudah isi → note_backdoor=4
+            if ($totalResponsible > 0 && $doneResponsible >= $totalResponsible) {
+                DB::table('document')->where('document_id', $docId)->update(['note_backdoor' => '4']);
+            }
+        }
+    }
+
     // approver can choose next stage
     if ($request->filled('next_stage')) {
         switch ($request->next_stage) {
@@ -1272,9 +1316,8 @@ return view('comments.company_list',compact(
     }
     // other roles handled elsewhere if needed
 
-    // Only re-run owner completion if approver did NOT choose a next stage
-    // (approver already set note_backdoor to 2 or 6 in the switch above)
-    if (!$request->filled('next_stage')) {
+    // Only re-run owner completion if OWNER saved and approver did NOT choose a next stage
+    if ($roleDone === 'OWNER' && !$request->filled('next_stage')) {
         $this->checkOwnerCompletion($docId);
     }
 

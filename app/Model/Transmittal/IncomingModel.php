@@ -1165,9 +1165,9 @@ public function getDocumentStatusByIssue($issue_status_id)
                         DB::statement("UPDATE document INNER JOIN sys_config SET document.incoming_transmittal_detail_id = '$row->incoming_transmittal_detail_id', document_status_id = '$row->document_status_id', issue_status_id = '$row->issue_status_id', deadline = '$returndate', status = 7 WHERE document_id = '$row->document_id'");
                     }
                     
-                    if(($row->issue_status_id == 1) || ($row->issue_status_id == 2) || ($row->issue_status_id == 3) || ($row->issue_status_id == 4) || ($row->issue_status_id == 5) || ($row->issue_status_id == 8) || ($row->issue_status_id == 9) || ($row->issue_status_id == 10) || ($row->issue_status_id == 11) || ($row->issue_status_id == 12) || ($row->issue_status_id == 13) || ($row->issue_status_id == 14) || ($row->issue_status_id == 15) || ($row->issue_status_id == 16) || ($row->issue_status_id == 18)) {
+                    if(($row->issue_status_id == 1) || ($row->issue_status_id == 2) || ($row->issue_status_id == 3) || ($row->issue_status_id == 4) || ($row->issue_status_id == 5) || ($row->issue_status_id == 6) || ($row->issue_status_id == 7) || ($row->issue_status_id == 8) || ($row->issue_status_id == 9) || ($row->issue_status_id == 10) || ($row->issue_status_id == 11) || ($row->issue_status_id == 12) || ($row->issue_status_id == 13) || ($row->issue_status_id == 14) || ($row->issue_status_id == 15) || ($row->issue_status_id == 16) || ($row->issue_status_id == 18)) {
                         /* ----------
-                         Assign ulang hanya untuk status IDC, IFR, IFI, IFC, IFA, Re-IFA, Re-IFI, Re-IFC
+                         Assign ulang hanya untuk status IDC, IFR, IFI, IFC, IFA, Re-IFA, Re-IFI, Re-IFC, Re-IFR
                         ----------------------- */
                         $cek_assign     = DB::table("assignment")->select("assignment_id", "incoming_transmittal_detail_id")->where("document_id", $row->document_id)->orderBy("assignment_id", "DESC")->get();
                         if(count($cek_assign) > 0) {

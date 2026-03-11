@@ -228,7 +228,7 @@ class CommentsController extends Controller
                 $qIssueStatus = $this->qReference->getSelectIssueStatus();
             }
             // $stsApproval           = ($qDataComment->order_no == $data["header"]->order_no) ? "APPROVAL" : "-";
-            $stsApproval           = ($qUserComment->role == 'APPROVER') ? "APPROVER" : "-";
+            $stsApproval           = in_array($data["header"]->role, ['APPROVER', 'APPROVER_COMPANY']) ? "APPROVER" : "-";
             # ---------------
             $file                  = (!empty($data["header"]->document_file)) ? asset("/uploads") . $data["header"]->document_url . $data["header"]->document_file : "";
             $file_crs              = (!empty($data["header"]->document_crs)) ? asset("/uploads") . $data["header"]->document_url . $data["header"]->document_crs : "";
@@ -281,7 +281,7 @@ class CommentsController extends Controller
             }
             // if($data["header"]->role=="APPROVER") {
             // if($stsApproval == "APPROVAL") {
-            if($qUserComment->role == 'APPROVER') {
+            if(in_array($data["header"]->role, ['APPROVER', 'APPROVER_COMPANY'])) {
                 $data["fields"][]      = form_select(array("name"=>"issue_status_id", "label"=>"Next Rev", "source"=>$qIssueStatus));
             }
             $data["fields_1"][]      = form_select(array("name"=>"approved_design_by", "label" => "Approval By", "source" => $selectUser, "value" => $data["header"]->approved_design_by));
@@ -715,7 +715,7 @@ class CommentsController extends Controller
             $qUserComment          = $this->qComments->getCommentDetailUser($data["header"]->assignment_id, Auth::user()->id);            
             $qIssueStatus          = $this->qReference->getSelectIssueStatusComments(STATUS_APPROVAL_IDC);
             // $stsApproval           = ($qDataComment->order_no == $data["header"]->order_no) ? "APPROVAL" : "-";
-            $stsApproval           = ($qUserComment->role == 'APPROVER') ? "APPROVER" : "-";
+            $stsApproval           = in_array($data["header"]->role, ['APPROVER', 'APPROVER_COMPANY']) ? "APPROVER" : "-";
             # ---------------
             $file                  = (!empty($data["header"]->document_file)) ? asset("/uploads") . $data["header"]->document_url . $data["header"]->document_file : "";
             $file_crs              = (!empty($data["header"]->document_crs)) ? asset("/uploads") . $data["header"]->document_url . $data["header"]->document_crs : "";

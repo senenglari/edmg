@@ -373,31 +373,75 @@ public function saveComments($request)
             $doc = DB::table("document")
                 ->where("document_id", $request->document_id)
                 ->first();
+
+            // Determine if next status is external (IFC/IFA/IFR/IFI) or internal (RE-xxx)
+            $externalStatuses = [STATUS_IFC, STATUS_IFA, STATUS_IFR, STATUS_IFI]; // 1, 3, 5, 7
+            $isExternalFlow = in_array((int)$request->issue_status_id, $externalStatuses);
+
             if ($doc && ($request->return_status_id == RETURN_COMMENT || $request->return_status_id == RETURN_REJECT)) {
-                $transmittalId = DB::table("outgoing_transmittal")->insertGetId([
-                    "outgoing_no" => "AUTO-REV-" . date("YmdHis"),
-                    "sender_date" => NULL,
-                    "vendor_id" => $doc->vendor_id,
-                    "project_id" => $doc->project_id,
-                    "email_address" => "",
-                    "cc_email_address" => "",
-                    "subject" => "REVISION REQUIRED - " . $doc->document_no,
-                    "content" => "Please upload revised document",
-                    "status_email" => 0,
-                    "created_by" => Auth::id(),
-                    "created_at" => now()
-                ]);
-                DB::table("outgoing_transmittal_detail")->insert([
-                    "outgoing_transmittal_id" => $transmittalId,
-                    "incoming_transmittal_detail_id" => $request->incoming_transmittal_detail_id,
-                    "return_status_id"   => $request->return_status_id,
-                    "issue_status_id"    => $request->issue_status_id,
-                    "document_status_id" => $request->document_status_id,
-                    "document_url" => null,
-                    "document_file" => null,
-                    "document_file_2" => null,
-                    "document_crs" => null
-                ]);
+
+                if ($isExternalFlow) {
+                    /* ===============================
+                       EXTERNAL FLOW: Create Outgoing Company draft (REV-xxx pattern)
+                       Flow: Outgoing Company → admin sends → vendor responds → new Incoming → approve → auto assignment
+                    =============================== */
+
+                    // 1. Create outgoing company transmittal draft
+                    $transmittalId = DB::table("outgoing_transmittal")->insertGetId([
+                        "outgoing_no" => "REV-" . date("YmdHis") . "-" . $request->document_id,
+                        "sender_date" => NULL,
+                        "vendor_id" => $doc->vendor_id,
+                        "project_id" => $doc->project_id,
+                        "email_address" => "",
+                        "cc_email_address" => "",
+                        "subject" => "NEW CYCLE REQUIRED - " . $doc->document_no,
+                        "content" => "Document requires new external review cycle",
+                        "status_email" => 0,
+                        "created_by" => Auth::id(),
+                        "created_at" => now()
+                    ]);
+                    DB::table("outgoing_transmittal_detail")->insert([
+                        "outgoing_transmittal_id" => $transmittalId,
+                        "incoming_transmittal_detail_id" => $request->incoming_transmittal_detail_id,
+                        "return_status_id"   => $request->return_status_id,
+                        "issue_status_id"    => $request->issue_status_id,
+                        "document_status_id" => $request->document_status_id,
+                        "document_url" => null,
+                        "document_file" => null,
+                        "document_file_2" => null,
+                        "document_crs" => null
+                    ]);
+
+                } else {
+                    /* ===============================
+                       INTERNAL FLOW: Keep current behavior (AUTO-REV-xxx)
+                    =============================== */
+
+                    $transmittalId = DB::table("outgoing_transmittal")->insertGetId([
+                        "outgoing_no" => "AUTO-REV-" . date("YmdHis"),
+                        "sender_date" => NULL,
+                        "vendor_id" => $doc->vendor_id,
+                        "project_id" => $doc->project_id,
+                        "email_address" => "",
+                        "cc_email_address" => "",
+                        "subject" => "REVISION REQUIRED - " . $doc->document_no,
+                        "content" => "Please upload revised document",
+                        "status_email" => 0,
+                        "created_by" => Auth::id(),
+                        "created_at" => now()
+                    ]);
+                    DB::table("outgoing_transmittal_detail")->insert([
+                        "outgoing_transmittal_id" => $transmittalId,
+                        "incoming_transmittal_detail_id" => $request->incoming_transmittal_detail_id,
+                        "return_status_id"   => $request->return_status_id,
+                        "issue_status_id"    => $request->issue_status_id,
+                        "document_status_id" => $request->document_status_id,
+                        "document_url" => null,
+                        "document_file" => null,
+                        "document_file_2" => null,
+                        "document_crs" => null
+                    ]);
+                }
             }
 
         } else {

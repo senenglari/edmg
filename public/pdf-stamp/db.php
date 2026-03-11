@@ -1,8 +1,8 @@
 <?php
 $host = "localhost";
 $user = "root";
-$pass = "";
-$db   = "dzariesm_db";
+$pass = "edmg2026";
+$db   = "db_edms";
 
 $conn = new mysqli($host, $user, $pass, $db);
 

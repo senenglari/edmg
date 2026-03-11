@@ -246,7 +246,7 @@ class CommentsController extends Controller
             $lpath=$laspath[2];
 
             
-            $file= "http://dzaries.my.id/edms/pdf-stamp/index.php?comment=1&pdf_id=".$pdf_id."&rname=".$rname."&idrole=".$idrole."&iduser=".$iduser."&fileName=".$fileName."&lpath=".$lpath;
+            $file= "https://edms.nusaindogas.com/pdf-stamp/index.php?comment=1&pdf_id=".$pdf_id."&rname=".$rname."&idrole=".$idrole."&iduser=".$iduser."&fileName=".$fileName."&lpath=".$lpath;
                        
             
             

@@ -86,7 +86,7 @@
 
 <div class="mt-4">
     @if ($pdf_id !== '')
-        <a href="http://dzaries.my.id/edms/pdf-stamp/index.php?pdf_id={{ $parts[2] }}&rname={{ auth()->user()->name }}&lpath={{ $laspath[2] }}&idrole={{ auth()->user()->position_id }}&iduser={{ auth()->user()->id }}&fileName={{ $document->document_file }}" 
+        <a href="https://edms.nusaindogas.com/pdf-stamp/index.php?pdf_id={{ $parts[2] }}&rname={{ auth()->user()->name }}&lpath={{ $laspath[2] }}&idrole={{ auth()->user()->position_id }}&iduser={{ auth()->user()->id }}&fileName={{ $document->document_file }}" 
 										   target="_blank" 
 										   class="btn btn-primary btn-lg">
             <i class="fas fa-file-pdf me-2"></i> Buka PDF

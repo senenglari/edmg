@@ -194,7 +194,7 @@ const CURRENT_USER = {
   name: "<?= htmlspecialchars($userName, ENT_QUOTES) ?>"
 };
 
-const ADOBE_KEY  = "6e754bf0041944e7b665e1d8c4b7f741";
+const ADOBE_KEY  = "9c5689e19dde46da93bf1e48087f984f";
 const BASE_URL   = "<?= $baseUrl ?>";
 
 const WORK_URL   = "<?= $WORK_URL ?>";
@@ -231,11 +231,11 @@ function stringToColor(str) {
 	  
 	  alert();
       const adobeDCView = new AdobeDC.View({
-        clientId: "6e754bf0041944e7b665e1d8c4b7f741",
+        clientId: "9c5689e19dde46da93bf1e48087f984f",
         divId: "adobe-dc-view"
       });
       adobeDCView.previewFile({
-        content: { location: { url: 'http://dzaries.my.id:8000/' + WORK_URL } },
+        content: { location: { url: 'https://edms.nusaindogas.com/' + WORK_URL } },
         metaData: { fileName: "test.pdf", id: "test" }
       }, {
         embedMode: "FULL_WINDOW"
